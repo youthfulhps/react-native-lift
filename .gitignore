@@ -85,3 +85,6 @@ example/android/
 
 # Step 1.2 measurement drops (videos/logs; see docs/poc-measure.md)
 poc-runs/
+
+# Python
+__pycache__/

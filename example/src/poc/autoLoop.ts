@@ -1,6 +1,11 @@
 import type { RefObject } from 'react';
-import { Platform, type FlatList } from 'react-native';
-import { withSpring, type SharedValue } from 'react-native-reanimated';
+import type { FlatList } from 'react-native';
+import {
+  makeMutable,
+  withSpring,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 import type { LiftHandle } from 'react-native-lift';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { Probe, ProbeCtx } from './probe';
@@ -34,7 +39,16 @@ const HOLD = 12;
 // Give up waiting for a lift/drop commit after this many frames.
 const TIMEOUT = 120;
 
-const frames = (n: number) =>
+// 1 while a cycle's measurement window is open. Drives the cyan gate square
+// that poc-auto.py uses to map recording frames to log cycles.
+export const gate = makeMutable(0);
+
+// Pressed-state scale. Timed, not instant, so pixel-check sees smooth motion.
+const press = (scale: SharedValue<number>) =>
+  (scale.value = withTiming(0.95, { duration: 100 }));
+const PRESS_FRAMES = 6;
+
+export const frames = (n: number) =>
   new Promise<void>((resolve) => {
     const tick = () => (--n <= 0 ? resolve() : requestAnimationFrame(tick));
     requestAnimationFrame(tick);
@@ -72,19 +86,10 @@ const near = (a: Rect, b: Rect) =>
   Math.abs(a.width - b.width) <= 1 &&
   Math.abs(a.height - b.height) <= 1;
 
-// First line of every run: ties logs/recordings to a commit and build type.
-const start = (name: string) =>
-  console.log(
-    `POC START run=${name} sha=${
-      process.env.EXPO_PUBLIC_GIT_SHA ?? 'unknown'
-    } os=${Platform.OS} dev=${__DEV__}`
-  );
-
 export async function runAutoLoop(
   list: RefObject<FlatList<number> | null>,
   setActive: (index: number) => void
 ): Promise<string> {
-  start('autoLoop');
   let failures = 0;
   list.current?.scrollToOffset({ offset: 0, animated: false });
   const perTarget = CYCLES / TARGETS.length;
@@ -109,7 +114,12 @@ export async function runAutoLoop(
       await frames(HOLD);
     }
 
+    gate.value = 1;
+    await frames(3);
     const reason = await runCycle(cycle, target);
+    gate.value = 0;
+    // Static frames after the gate so its off-frame shows no other motion.
+    await frames(10);
     if (reason !== 'none') {
       failures++;
     }
@@ -139,7 +149,6 @@ export async function runMovedDrop(
   mode: 'momentum' | 'settled',
   { target, base, shift }: { target: number; base: number; shift: number }
 ): Promise<string> {
-  start(`moved-${mode}`);
   let failures = 0;
   setActive(target);
   for (let cycle = 0; cycle < MOVED_CYCLES; cycle++) {
@@ -151,8 +160,10 @@ export async function runMovedDrop(
     if (!entry) {
       reason = 'not-mounted';
     } else {
-      entry.scale.value = 0.95;
-      await frames(HOLD);
+      gate.value = 1;
+      await frames(3);
+      press(entry.scale);
+      await frames(HOLD + PRESS_FRAMES);
       if (
         !(await until(entry, 'onLiftStart', () => entry.handle.current?.lift()))
       ) {
@@ -183,6 +194,9 @@ export async function runMovedDrop(
         }
       }
     }
+    gate.value = 0;
+    // Static frames after the gate so its off-frame shows no other motion.
+    await frames(10);
     if (reason !== 'none') {
       failures++;
     }
@@ -210,9 +224,9 @@ async function runCycle(cycle: number, target: number): Promise<string> {
     layout: entry.layout,
   };
 
-  entry.scale.value = 0.95;
+  press(entry.scale);
   // Longer than the probe's 10-frame pre-window, so it only sees the scaled pose.
-  await frames(HOLD);
+  await frames(HOLD + PRESS_FRAMES);
   if (
     !(await until(entry, 'onLiftStart', () => entry.handle.current?.lift()))
   ) {

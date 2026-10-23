@@ -1,7 +1,11 @@
 import { createRef, memo, useEffect, useRef, useState } from 'react';
 import {
+  Dimensions,
   FlatList,
+  Linking,
+  Platform,
   Pressable,
+  Settings,
   StyleSheet,
   Text,
   TextInput,
@@ -13,11 +17,14 @@ import {
 } from 'react-native';
 import Animated, {
   useAnimatedRef,
+  useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
 import { Liftable, useLiftRef } from 'react-native-lift';
 import {
   cells,
+  frames,
+  gate,
   mounts,
   runAutoLoop,
   runMovedDrop,
@@ -138,6 +145,38 @@ const Cell = memo(function CellView({
 const inputRef = createRef<TextInputInstance>();
 
 type Scenario = 'autoLoop' | 'momentum' | 'settled';
+type Job = {
+  run: string;
+  scenario: Scenario;
+  clip: boolean;
+  inverted: boolean;
+};
+
+// tag=<id>&jobs=c0i0-autoLoop,c1i0-settled,…  (c<clip>i<inverted>-<scenario>)
+// Delivered by example/scripts/poc-auto.py as `liftexample://poc?<spec>`, the
+// iOS launch argument `-pocSuite <spec>`, or EXPO_PUBLIC_POC_SUITE at bundle time.
+const SUITE_URL = 'liftexample://poc?';
+function parseSuite(spec: unknown): Job[] {
+  const q = Object.fromEntries(
+    String(spec ?? '')
+      .split('&')
+      .map((kv) => kv.split('=').map(decodeURIComponent))
+  ) as Record<string, string | undefined>;
+  return (q.jobs ?? '')
+    .split(',')
+    .filter(Boolean)
+    .map((job) => {
+      const [combo = '', scenario] = job.split('-');
+      return {
+        run: `${q.tag ?? 'suite'}-${job}`,
+        scenario: scenario as Scenario,
+        clip: combo[1] === '1',
+        inverted: combo[3] === '1',
+      };
+    });
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // Cell 21 is a 'normal' row; start it mid-screen and scroll 2 rows while lifted.
 const MOVED = { target: 21, base: 21 * ROW_H - 300, shift: 2 * ROW_H };
 
@@ -150,32 +189,69 @@ export function FlatListScreen() {
   // Also shown on screen: iOS release builds don't surface console.log.
   const [status, setStatus] = useState('idle');
 
-  const run = async (scenario: Scenario = 'autoLoop') => {
+  const run = async (job: Job) => {
     setRunning(true);
-    setStatus(`${scenario}…`);
+    setStatus(`${job.scenario}…`);
+    setClipped(job.clip);
+    setInverted(job.inverted);
+    let result = 'error';
     try {
-      setStatus(
-        scenario === 'autoLoop'
-          ? await runAutoLoop(list, setActive)
-          : await runMovedDrop(list, setActive, scenario, MOVED)
+      // Let a toggled list re-render and settle before the first cycle.
+      await frames(30);
+      const win = Dimensions.get('window');
+      // First line of every run: ties logs/recordings to a commit and build.
+      console.log(
+        `POC START run=${job.run} scenario=${job.scenario} clip=${+job.clip} ` +
+          `inverted=${+job.inverted} sha=${
+            process.env.EXPO_PUBLIC_GIT_SHA ?? 'unknown'
+          } os=${Platform.OS} dev=${__DEV__} win=${win.width}x${win.height}`
       );
+      result =
+        job.scenario === 'autoLoop'
+          ? await runAutoLoop(list, setActive)
+          : await runMovedDrop(list, setActive, job.scenario, MOVED);
     } finally {
+      console.log(`POC END run=${job.run} result=${result}`);
+      setStatus(result);
       setRunning(false);
     }
   };
-
-  // No tap tooling on the iOS simulator: `EXPO_PUBLIC_POC_AUTORUN=1 expo start` runs the loop on mount.
-  useEffect(() => {
-    const auto = process.env.EXPO_PUBLIC_POC_AUTORUN;
-    if (auto) {
-      // Native-only text (not in React props): a remount would lose it, so the
-      // final screenshot shows whether the TextInput survived lift/drop.
-      inputRef.current?.setNativeProps({ text: 'kept-native-text' });
-      const scenario = auto === '1' ? 'autoLoop' : (auto as Scenario);
-      const t = setTimeout(() => run(scenario), 1500);
-      return () => clearTimeout(t);
+  const busy = useRef(false);
+  const runSuite = async (jobs: Job[]) => {
+    if (busy.current || jobs.length === 0) {
+      return;
     }
-    return undefined;
+    busy.current = true;
+    for (const job of jobs) {
+      // READY gives poc-auto.py time to start a recording for this job.
+      console.log(`POC READY run=${job.run}`);
+      await sleep(5000);
+      await run(job);
+      await sleep(1500);
+    }
+    console.log('POC SUITE DONE');
+    busy.current = false;
+  };
+  const runSuiteRef = useRef(runSuite);
+  runSuiteRef.current = runSuite;
+
+  useEffect(() => {
+    // Native-only text (not in React props): a remount would lose it, so the
+    // final screenshot shows whether the TextInput survived lift/drop.
+    inputRef.current?.setNativeProps({ text: 'kept-native-text' });
+    const start = (spec: unknown) => runSuiteRef.current(parseSuite(spec));
+    const fromUrl = (url: string | null | undefined) => {
+      if (url?.startsWith(SUITE_URL)) {
+        start(url.slice(SUITE_URL.length));
+      }
+    };
+    start(process.env.EXPO_PUBLIC_POC_SUITE);
+    if (Platform.OS === 'ios') {
+      start(Settings.get('pocSuite'));
+    }
+    Linking.getInitialURL().then(fromUrl);
+    const sub = Linking.addEventListener('url', (e) => fromUrl(e.url));
+    return () => sub.remove();
   }, []);
 
   return (
@@ -193,7 +269,14 @@ export function FlatListScreen() {
           <Button
             key={scenario}
             title={scenario}
-            onPress={running ? undefined : () => run(scenario)}
+            onPress={
+              running
+                ? undefined
+                : () =>
+                    runSuite([
+                      { run: 'manual', scenario, clip: clipped, inverted },
+                    ])
+            }
           />
         ))}
         <Text>{status}</Text>
@@ -214,8 +297,15 @@ export function FlatListScreen() {
           <Cell index={item} active={item === active} />
         )}
       />
+      <Gate />
     </View>
   );
+}
+
+// Cyan square shown while a measurement window is open (see autoLoop `gate`).
+function Gate() {
+  const style = useAnimatedStyle(() => ({ opacity: gate.value }));
+  return <Animated.View style={[styles.gate, style]} pointerEvents="none" />;
 }
 
 function Button({ title, onPress }: { title: string; onPress?: () => void }) {
@@ -256,4 +346,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#888',
   },
   markerActive: { backgroundColor: '#FF00FF' },
+  gate: {
+    position: 'absolute',
+    // Bottom-right: clear of the dev-client button and the left-edge marker.
+    right: 8,
+    bottom: 48,
+    width: 16,
+    height: 16,
+    backgroundColor: '#00FFFF',
+  },
 });
