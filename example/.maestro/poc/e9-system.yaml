@@ -42,6 +42,14 @@ appId: lift.example
       - tapOn:
           id: e9-tap
       - assertVisible: "lifted:0 ends:3 home:yes taps:3"
+# lift() and drop() in one tick: no lift renders, the backdrop must not stay.
+- copyTextFrom:
+    id: e9-status
+- tapOn:
+    id: e9-liftdrop
+- tapOn:
+    id: e9-tap
+- assertNotVisible: ${maestro.copiedText}
 # Unmounted while lifted (timer, like a programmatic navigation): no orphan
 # in the overlay, backdrop gone.
 - tapOn:

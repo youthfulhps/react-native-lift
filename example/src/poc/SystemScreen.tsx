@@ -7,7 +7,7 @@ import {
   type HostInstance,
 } from 'react-native';
 import { useSharedValue, withSpring } from 'react-native-reanimated';
-import { Liftable } from 'react-native-lift';
+import { Liftable, useLiftRef } from 'react-native-lift';
 import { frames } from './autoLoop';
 
 // AC-E9: rotation, background, Android back, and an unmount (a timer, like a
@@ -21,6 +21,7 @@ export function SystemScreen() {
   const [taps, setTaps] = useState(0);
   const [shown, setShown] = useState(true);
   const scale = useSharedValue(1);
+  const handle = useLiftRef();
   const slot = useRef<HostInstance>(null);
   const content = useRef<HostInstance>(null);
   return (
@@ -47,6 +48,17 @@ export function SystemScreen() {
         <Text>{shown ? 'unmount in 4s' : 'unmounted'}</Text>
       </Pressable>
       <Pressable
+        testID="e9-liftdrop"
+        style={styles.button}
+        onPress={() => {
+          // Same tick: the lift never renders; the host must still be freed.
+          handle.current?.lift();
+          handle.current?.drop();
+        }}
+      >
+        <Text>lift + drop</Text>
+      </Pressable>
+      <Pressable
         testID="e9-remount"
         style={styles.button}
         onPress={() => setShown(true)}
@@ -56,6 +68,7 @@ export function SystemScreen() {
       {shown && (
         <View ref={slot} collapsable={false}>
           <Liftable
+            ref={handle}
             scale={scale}
             onLiftStart={() => {
               setLifted(true);

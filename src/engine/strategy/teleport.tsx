@@ -53,6 +53,7 @@ type HostContextValue = {
   offsetY: SharedValue<number>;
   // Runs the one-lift-at-a-time machine (liftState.ts); returns the new state.
   send: (event: LiftEvent<LiftHandle>) => LiftState<LiftHandle>;
+  phase: () => LiftState<LiftHandle>['phase'];
 };
 
 const HostContext = createContext<HostContextValue | null>(null);
@@ -84,6 +85,7 @@ export function LiftHost({ children }: { children: ReactNode }) {
         setActive(state.current.phase === 'idle' ? null : state.current.slot);
         return state.current;
       },
+      phase: () => state.current.phase,
     }),
     [offsetX, offsetY]
   );
@@ -177,7 +179,7 @@ export function LiftSlot({
   if (!host) {
     throw new Error('react-native-lift: wrap your app in <LiftProvider>');
   }
-  const { getHostRect, offsetX, offsetY, send } = host;
+  const { getHostRect, offsetX, offsetY, send, phase } = host;
   const wrapperRef = useRef<HostInstance>(null);
   const size = useRef({ width: 0, height: 0 });
   const [lifted, setLifted] = useState<Lifted | null>(null);
@@ -223,16 +225,26 @@ export function LiftSlot({
           TextInput.State.currentlyFocusedInput(),
           { liftable: latest.current.restoreFocus, drop }
         );
-        if (mounted.current && next) {
+        // Not onto a keyboard under another slot's lift.
+        if (mounted.current && next && phase() === 'idle') {
           TextInput.State.focusTextInput(next);
         }
       })
     );
   };
 
+  // Last rendered lifted state, as seen by the isLifted effect.
+  const wasLifted = useRef(false);
   const commit = (next: Lifted | null) => {
     liftedRef.current = next;
     setLifted(next);
+    if (!next && !wasLifted.current) {
+      // Dropped before the lift ever rendered (lift() and drop() in one
+      // batch, or rebound first): no isLifted edge will free the machine.
+      send({ type: 'dropped', slot: me() });
+      restore();
+      latest.current.onLiftCancel?.();
+    }
   };
 
   // Host-layer offset that puts the lifted container over the wrapper, or
@@ -291,26 +303,25 @@ export function LiftSlot({
     keyboardWait.current = null;
     const wrapper = windowRect(wrapperRef.current);
     const hostRect = getHostRect();
-    // Cancelled while waiting, or no onLayout yet (would lock the wrapper to 0x0).
-    if (
-      token !== dropToken.current ||
-      liftKey.current !== latest.current.itemKey ||
-      !wrapper ||
-      !hostRect ||
-      size.current.width === 0
-    ) {
-      // Idle by now unless another slot lifted meanwhile; then its lift
-      // must not be reopened onto a keyboard.
-      if (send({ type: 'cancel', slot: me() }).phase === 'idle') {
-        // The keyboard was dismissed for nothing: give focus back.
-        restore();
-      } else {
-        focused.current = null;
-      }
+    // Cancelled while waiting, no onLayout yet (would lock the wrapper to
+    // 0x0), or the machine moved on (dropped by a racing render).
+    const ok =
+      token === dropToken.current &&
+      liftKey.current === latest.current.itemKey &&
+      wrapper &&
+      hostRect &&
+      size.current.width > 0 &&
+      // Only measuring -> lifted: 'lifted' here means a lift() raced a drop
+      // whose render has not landed yet, and that render will free the host.
+      phase() === 'measuring' &&
+      owns(send({ type: 'committed', slot: me() }), me());
+    if (!ok || !wrapper || !hostRect) {
+      send({ type: 'cancel', slot: me() });
+      // The keyboard was dismissed for nothing: give focus back.
+      restore();
       latest.current.onLiftCancel?.();
       return;
     }
-    send({ type: 'committed', slot: me() });
     // B1: one commit flips hostName, sets the host-local rect, and locks
     // the wrapper to its untransformed onLayout size.
     commit({
@@ -337,11 +348,14 @@ export function LiftSlot({
         return true;
       }
       liftKey.current = latest.current.itemKey;
+      dropFocus.current = true;
       if (pendingLift.current) {
         pendingToken.current = ++dropToken.current;
         return true;
       }
-      dropFocus.current = true;
+      // The layer is ours; clear whatever a drop cut short by an unmount left.
+      offsetX.value = 0;
+      offsetY.value = 0;
       const token = ++dropToken.current;
       if (!Keyboard.isVisible()) {
         focused.current = null;
@@ -446,15 +460,21 @@ export function LiftSlot({
       }
       send({ type: 'dropped', slot: me() });
     };
-    // commit only touches a ref and the stable setLifted.
+    // commit() reads refs and stable context functions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offsetX, offsetY, send]);
 
   // Rebound to another item while lifted: render it dropped in this very
   // commit (the overlay never shows the new item); the effect below syncs.
   const shown = lifted && lifted.key === itemKey ? lifted : null;
   const isLifted = shown !== null;
-  const wasLifted = useRef(false);
   useLayoutEffect(() => {
+    // Rebound (itemKey), before or after the lifted render: finish the drop
+    // the render above already shows.
+    if (liftedRef.current && liftedRef.current.key !== itemKey) {
+      dropToken.current++;
+      commit(null);
+    }
     if (isLifted === wasLifted.current) {
       return;
     }
@@ -469,16 +489,21 @@ export function LiftSlot({
     // slot from lifting onto the layer before 'dropped'.
     offsetX.value = 0;
     offsetY.value = 0;
-    if (liftedRef.current) {
-      // itemKey changed: dropped by render above; stop any drop animation.
-      dropToken.current++;
-      commit(null);
-    }
     send({ type: 'dropped', slot: me() });
     restore();
     onLiftEnd?.();
-    // restore() reads restoreFocus from this render.
-  }, [isLifted, onLiftStart, onLiftEnd, offsetX, offsetY, send]);
+    // restore() and commit() read refs and stable context functions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    lifted,
+    itemKey,
+    isLifted,
+    onLiftStart,
+    onLiftEnd,
+    offsetX,
+    offsetY,
+    send,
+  ]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     size.current = {
