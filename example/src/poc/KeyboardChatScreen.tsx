@@ -104,15 +104,25 @@ const Message = memo(function MessageView({
   }, [isTarget, probe]);
   // Lift window: opens once the keyboard has closed and this message has
   // stopped moving (Android's KeyboardAvoidingView relayouts after the hide
-  // event), one frame ahead of the engine's 3-frame check. onLiftStart
-  // closes it; the timeout does if no lift follows.
+  // event), one frame ahead of the engine's 3-frame check. "Closed" is the
+  // engine's signal: the end of the iOS hide animation (keyboardWillHide +
+  // duration), else keyboardDidHide. onLiftStart closes the window; the
+  // timeout does if no lift follows.
   useEffect(() => {
     if (!isTarget) {
       return undefined;
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const sub = Keyboard.addListener('keyboardDidHide', async () => {
-      press.current.hiddenAt = Date.now();
+    let end: ReturnType<typeof setTimeout> | undefined;
+    // One open per hide: the will-timer or didHide, whichever comes first.
+    // Re-armed when the keyboard shows again (focus restore).
+    let waiting = false;
+    const closed = async () => {
+      if (waiting) {
+        return;
+      }
+      waiting = true;
+      clearTimeout(end);
       // Same rule as the engine (same rect 3 frames running), then 2 of the
       // engine's 3 extra frames: the window opens just before the commit.
       // `before` keeps the latest pre-commit rect.
@@ -133,10 +143,26 @@ const Message = memo(function MessageView({
       gate.value = 1;
       clearTimeout(timer);
       timer = setTimeout(() => (gate.value = 0), 2000);
-    });
+    };
+    const subs = [
+      Keyboard.addListener('keyboardDidShow', () => {
+        waiting = false;
+      }),
+      Keyboard.addListener('keyboardWillHide', (e) => {
+        if (e.duration > 0) {
+          clearTimeout(end);
+          end = setTimeout(closed, e.duration);
+        }
+      }),
+      Keyboard.addListener('keyboardDidHide', () => {
+        press.current.hiddenAt = Date.now();
+        closed();
+      }),
+    ];
     return () => {
-      sub.remove();
+      subs.forEach((sub) => sub.remove());
       clearTimeout(timer);
+      clearTimeout(end);
     };
   }, [isTarget]);
 

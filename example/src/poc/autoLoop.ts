@@ -23,6 +23,11 @@ export type CellEntry = {
   ctx?: ProbeCtx;
   onLiftStart?: () => void;
   onLiftEnd?: () => void;
+  // Index this cell had at onLiftStart, until onLiftEnd.
+  liftedIndex?: number;
+  // Renders of another index while lifted: the overlay showed that item
+  // (P3 rebind; itemKey must keep this at 0).
+  shownOther: number;
 };
 
 // FlatList and FlashList share the two scroll calls the harness uses.
@@ -217,15 +222,22 @@ export async function runMovedDrop(
         reason = 'no-lift-start';
       } else {
         await springTo1(entry.scale);
+        entry.shownOther = 0;
         // The window spans the move too: the lifted marker must hold still.
         const dropped = await transition(async () => {
           await move();
-          return until(entry, 'onLiftEnd', () => entry.handle.current?.drop());
+          // rebind: itemKey drops on the rebind itself (nothing lifted now).
+          const autoDropped =
+            mode === 'rebind' && entry.liftedIndex === undefined;
+          return (
+            autoDropped ||
+            until(entry, 'onLiftEnd', () => entry.handle.current?.drop())
+          );
         }, HOLD * 3);
         if (mode === 'rebind') {
           console.log(
             `REBIND cycle=${cycle} slotIndexAtDrop=${entry.index} ` +
-              `lockReleased=${lock.scrollEnabled}`
+              `shownOther=${entry.shownOther} lockReleased=${lock.scrollEnabled}`
           );
           list.current?.scrollToOffset({ offset: base, animated: false });
           await frames(HOLD * 2);

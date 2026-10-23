@@ -156,6 +156,11 @@ def judge(job, lines, pixel_lines, dev):
         'fps': next((re.search(r'fps=([\d.]+)', x).group(1)
                      for x in pixel_lines if x.startswith('PIXEL')), None),
     }
+    if job['scenario'] == 'rebind':
+        # Cycles whose overlay showed another item while lifted (itemKey: 0).
+        v['rebind_shown_other'] = [
+            x for x in lines if x.startswith('REBIND')
+            and not re.search(r'shownOther=0\b', x)]
     v['valid'] = v['ended'] and v['cycles'] == expected and \
         v['windows'] == 2 * expected and bool(done)
     v['assert_ok'] = v['valid'] and not v['assert_fail']
@@ -401,7 +406,9 @@ def report(a, captured):
         verdicts.append(v)
         print(f"{job}: valid={v['valid']} assert_ok={v['assert_ok']} "
               f"pixel_ok={v['pixel_ok']} probe_ok={v.get('probe_ok', '-')} "
-              f"bad_cycles={v['pixel_bad_cycles']}", flush=True)
+              f"bad_cycles={v['pixel_bad_cycles']}"
+              + (f" shown_other={len(v['rebind_shown_other'])}"
+                 if 'rebind_shown_other' in v else ''), flush=True)
     with open(os.path.join(a.out, 'summary.md'), 'w') as f:
         f.write('| run | valid | P1 assert | P2(a) bad cycles | P2(b) | fps |\n'
                 '|---|---|---|---|---|---|\n')

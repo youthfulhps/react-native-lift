@@ -1,0 +1,65 @@
+# AC-E9: each system event while lifted drops at once, with the content
+# back in its slot (home:yes) and the backdrop gone (the tap counts).
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-system
+# Rotation
+- longPressOn:
+    id: e9-card
+- assertVisible: "lifted:1 ends:0 .*"
+- setOrientation: LANDSCAPE_LEFT
+- assertVisible: "lifted:0 ends:1 home:yes taps:0"
+- setOrientation: PORTRAIT
+- tapOn:
+    id: e9-tap
+- assertVisible: "lifted:0 ends:1 home:yes taps:1"
+# Background
+- longPressOn:
+    id: e9-card
+- assertVisible: "lifted:1 ends:1 .*"
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible: "lifted:0 ends:2 home:yes taps:1"
+- tapOn:
+    id: e9-tap
+- assertVisible: "lifted:0 ends:2 home:yes taps:2"
+# Android back: drops and is consumed (the app stays on this screen).
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - longPressOn:
+          id: e9-card
+      - assertVisible: "lifted:1 ends:2 .*"
+      - back
+      - assertVisible: "lifted:0 ends:3 home:yes taps:2"
+      - tapOn:
+          id: e9-tap
+      - assertVisible: "lifted:0 ends:3 home:yes taps:3"
+# Unmounted while lifted (timer, like a programmatic navigation): no orphan
+# in the overlay, backdrop gone.
+- tapOn:
+    id: e9-unmount-later
+- longPressOn:
+    id: e9-card
+- assertVisible: "lifted:1 .*"
+- extendedWaitUntil:
+    visible: unmounted
+    timeout: 6000
+- assertNotVisible:
+    id: e9-card
+- copyTextFrom:
+    id: e9-status
+- tapOn:
+    id: e9-tap
+- assertNotVisible: ${maestro.copiedText}
+- tapOn:
+    id: e9-remount
+- assertVisible:
+    id: e9-card

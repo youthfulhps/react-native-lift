@@ -1,4 +1,12 @@
-import { createRef, memo, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createRef,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Dimensions,
   FlatList,
@@ -74,7 +82,16 @@ const Cell = memo(function CellView({
     rect: () => contentRef.current?.getBoundingClientRect(),
     cellRect: () => cellRef.current?.getBoundingClientRect(),
     layout: { width: 0, height: 0 },
+    shownOther: 0,
   }));
+
+  // After LiftSlot's own layout effects: an itemKey drop has already run
+  // onLiftEnd by now, so only an overlay still showing this cell counts.
+  useLayoutEffect(() => {
+    if (entry.liftedIndex !== undefined && entry.liftedIndex !== index) {
+      entry.shownOther++;
+    }
+  }, [entry, index]);
 
   useEffect(() => {
     mounts.set(index, (mounts.get(index) ?? 0) + 1);
@@ -100,13 +117,16 @@ const Cell = memo(function CellView({
         ref={handle}
         scale={scale}
         style={liftableStyle[kind]}
+        itemKey={index}
         onLiftStart={() => {
+          entry.liftedIndex = index;
           if (entry.ctx) {
             probe.mark('lift', entry.ctx);
           }
           entry.onLiftStart?.();
         }}
         onLiftEnd={() => {
+          entry.liftedIndex = undefined;
           if (entry.ctx) {
             probe.mark('drop', entry.ctx);
           }

@@ -6,6 +6,7 @@ import { FlatListScreen } from './poc/FlatListScreen';
 import { GesturesScreen } from './poc/GesturesScreen';
 import { KeyboardChatScreen } from './poc/KeyboardChatScreen';
 import { ScrollConflictScreen } from './poc/ScrollConflictScreen';
+import { SystemScreen } from './poc/SystemScreen';
 import { VideoScreen } from './poc/VideoScreen';
 
 // PoC screens; the Maestro flows in example/.maestro/poc tap these tabs.
@@ -15,6 +16,7 @@ const SCREENS = {
   chat: KeyboardChatScreen,
   video: VideoScreen,
   scroll: ScrollConflictScreen,
+  system: SystemScreen,
 };
 
 export default function App() {
