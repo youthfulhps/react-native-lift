@@ -65,10 +65,12 @@ function Status() {
 const Message = memo(function MessageView({
   id,
   auto,
+  restore,
   addMessages,
 }: {
   id: number;
   auto: Auto;
+  restore: boolean;
   addMessages: (n: number) => void;
 }) {
   const handle = useLiftRef();
@@ -170,6 +172,7 @@ const Message = memo(function MessageView({
     <Liftable
       ref={handle}
       scale={scale}
+      restoreFocus={restore}
       onLiftStart={async () => {
         status.lifted = true;
         status.set({ lifted: true, lifts: ++status.lifts });
@@ -250,6 +253,8 @@ export function KeyboardChatScreen() {
   // Inverted: index 0 is the newest message, drawn at the bottom.
   const [ids, setIds] = useState(() => Array.from({ length: 30 }, (_, i) => i));
   const [auto, setAuto] = useState<Auto>('off');
+  // Diagnosis only (Step 2.2): off removes the keyboard reopening after drop.
+  const [restore, setRestore] = useState(true);
   const scrollEnabled = useLiftScrollLock();
   const next = useRef(1000);
   const addMessages = useCallback(
@@ -278,6 +283,13 @@ export function KeyboardChatScreen() {
         >
           <Text>{`auto:${auto}`}</Text>
         </Pressable>
+        <Pressable
+          testID="restore-toggle"
+          style={styles.button}
+          onPress={() => setRestore((r) => !r)}
+        >
+          <Text>{`restore:${restore ? 'on' : 'off'}`}</Text>
+        </Pressable>
         <Gate />
       </View>
       <FlatList
@@ -289,7 +301,12 @@ export function KeyboardChatScreen() {
         keyExtractor={String}
         scrollEnabled={scrollEnabled}
         renderItem={({ item }) => (
-          <Message id={item} auto={auto} addMessages={addMessages} />
+          <Message
+            id={item}
+            auto={auto}
+            restore={restore}
+            addMessages={addMessages}
+          />
         )}
       />
       <TextInput
