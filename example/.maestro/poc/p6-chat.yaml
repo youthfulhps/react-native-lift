@@ -64,6 +64,17 @@ env:
           timeout: 1500
       - longPressOn:
           id: lift-target
+      # RESTORE=0: focus:no holds from the lift on, so wait for the lift
+      # itself before waiting for the drop.
+      - runFlow:
+          when:
+            true: ${RESTORE == "0"}
+          commands:
+            - extendedWaitUntil:
+                visible:
+                  id: chat-lifted
+                  text: "lifted:1"
+                timeout: 5000
       # Lifted, dropped by the screen 4.5s later, focus restored.
       - extendedWaitUntil:
           visible:
