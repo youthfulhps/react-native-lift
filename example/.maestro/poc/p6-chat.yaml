@@ -22,9 +22,9 @@ appId: lift.example
       - tapOn:
           id: auto-toggle
 - assertVisible: "auto:${AUTO}"
+# The input is pre-filled with "hello" (Maestro's iOS inputText hangs).
 - tapOn:
     id: chat-input
-- inputText: "hello"
 - repeat:
     times: ${ROUNDS}
     commands:

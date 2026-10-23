@@ -241,6 +241,9 @@ export function KeyboardChatScreen() {
         testID="chat-input"
         style={styles.input}
         placeholder="message"
+        // Pre-filled: Maestro's iOS inputText hangs intermittently, and E6
+        // only needs a value that must survive the lift.
+        defaultValue="hello"
         onFocus={() => status.set({ focused: true })}
         onBlur={() => status.set({ focused: false })}
       />
