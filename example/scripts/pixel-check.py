@@ -8,14 +8,16 @@ Usage:
 
 Prints one line:
   PIXEL frames=<n> fps=<x> missing=<count> over_tolerance=<count>
-With --windows, also one WINDOW line per cyan-gate window (one per PoC cycle,
-in log order) and one FLAG line per bad frame inside a window:
+With --windows, also one WINDOW line per cyan-gate window (two per PoC
+cycle: lift, drop, in log order) and one FLAG line per bad frame inside it:
   missing  marker not found
-  jump     |d_i| > tol and |v_i| > tol + 2*max(|v_i-1|, |v_i+1|)
-  spike    d_i . d_i+1 < 0 and min(|d_i|, |d_i+1|) > tol + 2*max(|v_i-1|, |v_i+2|)
-d_i is the marker displacement into frame i (dp, max-abs norm), v_i the same
-scaled to one 60Hz frame (VFR-safe; intervals under one frame count as one). Smooth motion (press, spring, scroll,
-drop animation) changes velocity gradually and passes; a teleport or a
+  jump     |d_i| > tol and s_i > tol + 2*max(s_i-1, s_i+1)
+  spike    d_i . d_i+1 < 0 and min(|d_i|, |d_i+1|) > tol + 2*max(s_i-1, s_i+2)
+d_i is the step into the i-th distinct marker position (dp, max-abs norm);
+repeated positions (dropped render frames, VFR idle) are skipped. s_i is
+|d_i| per display frame: mid-motion gaps of up to 3 frames divide, a change
+out of a still pose counts as one frame. Smooth motion (press, spring,
+scroll, drop animation) changes speed gradually and passes; a teleport or a
 one-frame excursion does not.
 Warnings go to stderr. Always exits 0: it reports numbers, people judge them.
 """
@@ -180,33 +182,44 @@ def windows(points, gates, times, tol):
     out = []
     for n, (a, b) in enumerate(spans):
         inside = range(a, min(b, len(times)))
-        # Context frames around the window (1 before, 2 after): VFR writes no
-        # frames while the screen is static, so a spike's return frame can be
-        # the gate-off frame. The harness holds still 10 frames after the gate.
-        idx = list(range(max(a - 1, 0), min(b + 2, len(times))))
+        # Up to 2 context frames each side, within 50ms of the window: a
+        # spike's return can be the gate-off frame, but under VFR the "next
+        # frame" may be the next cycle's motion seconds later.
+        lo, hi = times[a] - 0.05, times[inside[-1]] + 0.05
+        idx = [k for k in range(max(a - 2, 0), min(b + 2, len(times)))
+               if k in inside or lo <= times[k] <= hi]
         flags = [(k, 'missing', 0.0) for k in inside if points[k] is None]
-        d, v = {}, {}
-        for i, k in enumerate(idx[1:], 1):
-            p, q = points[idx[i - 1]], points[k]
-            dt = times[k] - times[idx[i - 1]]
-            if p is None or q is None or dt <= 0:
+        # Distinct positions only: a repeated frame is a dropped render frame
+        # (or VFR idle), so steps are compared change to change.
+        seq = []
+        for k in idx:
+            p = points[k]
+            if p is not None and (not seq or max(
+                    abs(p[0] - seq[-1][1][0]), abs(p[1] - seq[-1][1][1])) > 0.05):
+                seq.append((k, p))
+        steps = [None] + [(q[0] - p[0], q[1] - p[1])
+                          for (_, p), (_, q) in zip(seq, seq[1:])]
+        mag = [0.0 if s_ is None else max(abs(c) for c in s_) for s_ in steps]
+        # Per-display-frame speed. Mid-motion (previous step <= 2 frames ago)
+        # a longer gap is frames the recorder/emulator skipped: divide by
+        # them, at most 3. Out of a still pose a change counts as one frame.
+        gap = [None] + [(times[q[0]] - times[p[0]]) * 60
+                        for p, q in zip(seq, seq[1:])]
+        speed = [0.0] + [
+            mag[i] / (min(max(round(gap[i]), 1), 3)
+                      if i > 1 and gap[i - 1] <= 2.5 else 1)
+            for i in range(1, len(seq))]
+        at = lambda i: speed[i] if 0 <= i < len(speed) else 0.0
+        for i in range(1, len(seq)):
+            k = seq[i][0]
+            if k not in inside:
                 continue
-            d[k] = (q[0] - p[0], q[1] - p[1])
-            # Floor at one display frame: two encoder frames stamped a few ms
-            # apart are timestamp jitter, not motion faster than the display.
-            v[k] = max(abs(c) for c in d[k]) * (1 / 60) / max(dt, 1 / 60)
-        mag = {k: max(abs(c) for c in d[k]) for k in d}
-        for i, k in enumerate(idx):
-            prev = idx[i - 1] if i > 0 else None
-            nxt = idx[i + 1] if i + 1 < len(idx) else None
-            nxt2 = idx[i + 2] if i + 2 < len(idx) else None
-            if k not in inside or k not in d or prev not in v or nxt not in v:
-                continue
-            if mag[k] > tol and v[k] > tol + 2 * max(v[prev], v[nxt]):
-                flags.append((k, 'jump', mag[k]))
-            if nxt2 in v and d[k][0] * d[nxt][0] + d[k][1] * d[nxt][1] < 0:
-                size = min(mag[k], mag[nxt])
-                if size > tol + 2 * max(v[prev], v[nxt2]):
+            if mag[i] > tol and speed[i] > tol + 2 * max(at(i - 1), at(i + 1)):
+                flags.append((k, 'jump', mag[i]))
+            if i + 1 < len(seq) and steps[i][0] * steps[i + 1][0] + \
+                    steps[i][1] * steps[i + 1][1] < 0:
+                size = min(mag[i], mag[i + 1])
+                if size > tol + 2 * max(at(i - 1), at(i + 2)):
                     flags.append((k, 'spike', size))
         flags.sort()
         out.append(f'WINDOW n={n} t0={times[a]:.4f} t1={times[inside[-1]]:.4f} '
@@ -242,10 +255,22 @@ def self_test():
     tail = still[:9] + [(10.0, -134.0)] + still[10:]
     assert any('kind=spike' in x for x in windows(
         tail, [True] * 10 + [False] * 2, t, 1.0)), 'spike at window edge'
-    # Smooth motion with two frames stamped 3ms apart (encoder jitter) passes.
-    jt = t[:6] + [t[5] + 0.003] + [x + 1 / 60 for x in t[6:11]]
+    # ...also when the next cycle's motion is the frame after, much later.
+    far = t[:11] + [5.0]
+    nxt = still[:9] + [(10.0, -134.0), still[0], (10.0, 154.0)]
+    assert any('kind=spike' in x for x in windows(
+        nxt, [True] * 10 + [False] * 2, far, 1.0)), 'far neighbour'
+    # Smooth motion with one dropped render frame (repeat, then catch-up).
     move = [(10.0, 10.0 + 10 * i) for i in range(12)]
-    assert windows(move, [True] * 12, jt, 1.0)[0].endswith('bad=0'), 'jitter'
+    drop = move[:6] + [move[5]] + move[7:]
+    assert windows(drop, [True] * 12, t, 1.0)[0].endswith('bad=0'), 'drop'
+    # Mid-motion skipped frame (one 2-frame step) passes.
+    skip = move[:6] + move[7:] + [move[-1]]
+    st = t[:6] + [x + 1 / 60 for x in t[6:]]
+    assert windows(skip, [True] * 12, st, 1.0)[0].endswith('bad=0'), 'skip'
+    # A small lasting jump after a static stretch is still a jump.
+    small = still[:5] + [(10.0, 15.0)] * 7
+    assert any('kind=jump' in x for x in windows(small, [True] * 12, t, 1.0))
     ramp = [(10.0, 10.0 + 0.5 * i * i) for i in range(12)]
     assert windows(ramp, [True] * 12, t, 1.0)[0].endswith('bad=0'), ramp
     print('SELF-TEST ok')
