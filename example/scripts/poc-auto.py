@@ -52,7 +52,7 @@ class Log:
     def _pump(self):
         for line in self.proc.stdout:
             # Keep only the PoC payload (drops the os_log / logcat prefix).
-            m = re.search(r'(POC |AUTOLOOP |MOVED |PROBE)', line)
+            m = re.search(r'(POC |AUTOLOOP |MOVED |PROBE|P4 |REBIND )', line)
             if m:
                 payload = line[m.start():].rstrip()
                 self.lines.append(payload)
@@ -136,6 +136,10 @@ def judge(job, lines, pixel_lines, dev):
     done = [x for x in lines if ' DONE ' in x]
     windows = [x for x in pixel_lines if x.startswith('WINDOW')]
     flags = [x for x in pixel_lines if x.startswith('FLAG')]
+    if job['scenario'] == 'rebind':
+        # Its drop commits immediately to an off-screen slot: allowed jump.
+        flags = [f for f in flags
+                 if int(re.search(r'window=(\d+)', f).group(1)) % 2 == 0]
     # Two windows per cycle (lift, drop): cycle n = windows 2n, 2n+1.
     bad_window = {int(re.search(r'window=(\d+)', f).group(1)) // 2
                   for f in flags}
@@ -161,7 +165,10 @@ def judge(job, lines, pixel_lines, dev):
             r'^PROBE cycle=(\d+) kind=(\w+) frame=(-?\d+) delta=([\d.]+) '
             r'settle=(\w+)')
         probes = [m.groups() for m in map(probe_re.match, lines) if m]
-        over = [p for p in probes if float(p[3]) > 1 and p[4] != 'true']
+        # Pre-window frames before the settled tail (the probe's reference)
+        # are the list's own motion, not the handoff: judge from k = -2.
+        over = [p for p in probes if float(p[3]) > 1 and p[4] != 'true'
+                and int(p[2]) >= -2]
         settle = [p for p in probes if p[4] == 'true']
         # Settle condition 4: the same cycle's P2(a) window must be clean.
         settle_bad = [p for p in settle if int(p[0]) in bad_window]
@@ -179,6 +186,101 @@ def judge(job, lines, pixel_lines, dev):
     return v
 
 
+def device_id(platform):
+    if platform == 'ios':
+        out = json.loads(subprocess.run(
+            ['xcrun', 'simctl', 'list', 'devices', 'booted', '-j'],
+            capture_output=True, text=True, check=True).stdout)
+        return next(d['udid'] for devs in out['devices'].values() for d in devs)
+    return subprocess.run(['adb', 'get-serialno'], capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+
+def run_maestro(a):
+    """One Maestro flow with the device log (and optionally the screen)
+    captured; judged on the flow result, pixel windows and PROBE lines."""
+    os.makedirs(a.out, exist_ok=True)
+    if a.dev_url:
+        # Debug build: fresh JS state per flow (flows expect a fresh app).
+        if a.platform == 'ios':
+            subprocess.run(['xcrun', 'simctl', 'terminate', 'booted',
+                            'lift.example'], capture_output=True)
+            subprocess.run(['xcrun', 'simctl', 'openurl', 'booted', a.dev_url])
+        else:
+            subprocess.run(['adb', 'shell', 'am', 'force-stop', 'lift.example'])
+            subprocess.run(['adb', 'shell', "am start -a android.intent.action"
+                            f".VIEW -d '{a.dev_url}'"], capture_output=True)
+        time.sleep(12)
+    log = Log(a.platform, os.path.join(a.out, 'device-log.txt'))
+    video = os.path.join(a.out, 'video.mp4')
+    rec = Recorder(a.platform, video) if a.record else None
+    cmd = ['maestro', '--device', device_id(a.platform), 'test']
+    for e in a.env:
+        cmd += ['-e', e]
+    started = time.time()
+    try:
+        r = subprocess.run(cmd + [a.maestro], capture_output=True, text=True,
+                           timeout=1800, env={
+                               **os.environ, 'MAESTRO_CLI_NO_ANALYTICS': '1',
+                               'MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED': 'true'})
+    finally:
+        time.sleep(1)
+        if rec:
+            rec.stop()
+        log.close()
+    open(os.path.join(a.out, 'maestro.txt'), 'w').write(r.stdout + r.stderr)
+    lines = log.lines
+    v = {'flow': os.path.basename(a.maestro), 'env': a.env,
+         'maestro_ok': r.returncode == 0,
+         'seconds': round(time.time() - started)}
+    bad_cycles = set()
+    if rec:
+        win = next((re.search(r'win=([\d.]+)x', x).group(1) for x in lines
+                    if x.startswith('POC SCREEN')), None)
+        pixel = subprocess.run(
+            [sys.executable, os.path.join(HERE, 'pixel-check.py'), video,
+             '--screen-width-dp', win or '0', '--min-fps', '60', '--windows'],
+            capture_output=True, text=True)
+        pl = (pixel.stdout + pixel.stderr).splitlines()
+        open(os.path.join(a.out, 'pixel.txt'), 'w').write('\n'.join(pl))
+        flags = [x for x in pl if x.startswith('FLAG')]
+        if a.pixel_lift_only:
+            # Drop windows hold an allowed jump (target pushed off screen).
+            flags = [f for f in flags
+                     if int(re.search(r'window=(\d+)', f).group(1)) % 2 == 0]
+        bad_cycles = {int(re.search(r'window=(\d+)', f).group(1)) // 2
+                      for f in flags}
+        v.update({'windows': sum(x.startswith('WINDOW') for x in pl),
+                  'pixel_flags': flags,
+                  'fps': next((re.search(r'fps=([\d.]+)', x).group(1)
+                               for x in pl if x.startswith('PIXEL')), None)})
+    probe_re = re.compile(r'^PROBE cycle=(\d+) kind=(\w+) frame=(-?\d+) '
+                          r'delta=([\d.]+) settle=(\w+)')
+    probes = [m.groups() for m in map(probe_re.match, lines) if m]
+    # P6: focus restore reopens the keyboard 2 frames after a drop commit, so
+    # drop frames past --probe-drop-frames are app layout, not handoff (0 =
+    # judge lift only, e.g. when the target moved while lifted).
+    # Pre-window frames before the settled tail are the app's own motion
+    # (the keyboard closing), not the handoff: judge from k = -2.
+    probes = [p for p in probes if int(p[2]) >= -2]
+    probes = [p for p in probes if p[1] == 'lift' or
+              (a.probe_drop_frames is None or
+               (a.probe_drop_frames > 0 and int(p[2]) <= a.probe_drop_frames))]
+    if probes:
+        over = [p for p in probes if float(p[3]) > 1 and p[4] != 'true']
+        settle_bad = [p for p in probes if p[4] == 'true' and
+                      int(p[0]) in bad_cycles]
+        v.update({'probe_lines': len(probes),
+                  'settle_frames': sum(p[4] == 'true' for p in probes),
+                  'probe_over': [' '.join(p) for p in over + settle_bad]})
+    v['other'] = [x for x in lines if x.startswith(('P4 ', 'REBIND '))]
+    json.dump(v, open(os.path.join(a.out, 'verdict.json'), 'w'), indent=2)
+    print(f"{v['flow']} {' '.join(a.env)}: maestro_ok={v['maestro_ok']} "
+          f"windows={v.get('windows', '-')} flags={len(v.get('pixel_flags', []))} "
+          f"probe_over={len(v.get('probe_over', [])) if probes else '-'} "
+          f"{v['seconds']}s", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--platform', choices=['ios', 'android'], required=True)
@@ -192,7 +294,20 @@ def main():
                     help='run every combination in one app process (triage)')
     ap.add_argument('--external', action='store_true',
                     help='do not launch; print the spec and listen (debug)')
+    ap.add_argument('--maestro', help='run this Maestro flow instead')
+    ap.add_argument('--env', action='append', default=[],
+                    help='K=V passed to the flow (repeatable)')
+    ap.add_argument('--dev-url', help='debug: relaunch the dev client at '
+                    'this URL before the flow')
+    ap.add_argument('--pixel-lift-only', action='store_true',
+                    help='judge only lift windows (immediate-drop scenarios)')
+    ap.add_argument('--probe-drop-frames', type=int, default=None,
+                    help='judge drop PROBE frames only up to this k')
+    ap.add_argument('--record', action='store_true',
+                    help='record the screen during the flow (pixel windows)')
     a = ap.parse_args()
+    if a.maestro:
+        return run_maestro(a)
     combos = (a.combos or ('c0i0,c0i1' if a.platform == 'ios'
                            else 'c0i0,c1i0,c0i1,c1i1')).split(',')
     scenarios = (a.scenarios or ('autoLoop' if a.build == 'debug'

@@ -1,0 +1,18 @@
+# P4 on Android TextureView (p4-video.yaml covers SurfaceView).
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-video
+- tapOn:
+    id: surface-toggle
+- assertVisible: "surface:textureView"
+- tapOn:
+    id: run-p4
+- extendedWaitUntil:
+    visible: "P4 done.*"
+    timeout: 60000
+- assertVisible: "P4 done expo:ok rnv:ok"

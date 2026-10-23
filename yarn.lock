@@ -3173,6 +3173,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@shopify/flash-list@npm:2.3.2":
+  version: 2.3.2
+  resolution: "@shopify/flash-list@npm:2.3.2"
+  peerDependencies:
+    "@babel/runtime": "*"
+    react: "*"
+    react-native: "*"
+  checksum: 10c0/3e58913506b1dc7f02dd0696c478fd963ede413d9d7121705a08ff505d5c21e611813ce9370068238b8983ff582ed7b8ee94f68e94f99a1ac8f600c01fff118e
+  languageName: node
+  linkType: hard
+
 "@sinclair/typebox@npm:^0.27.8":
   version: 0.27.12
   resolution: "@sinclair/typebox@npm:0.27.12"
@@ -5776,6 +5787,17 @@ __metadata:
   peerDependencies:
     expo: "*"
   checksum: 10c0/22ba7c8ade140021225966107ff543eddfabc5cc3d506f193e4da313009c72754ab2b0da7ca6ba2acc0485774bbec95f00f4f97b46c642870a735aafbc78f9bb
+  languageName: node
+  linkType: hard
+
+"expo-video@npm:~58.0.12":
+  version: 58.0.12
+  resolution: "expo-video@npm:58.0.12"
+  peerDependencies:
+    expo: "*"
+    react: "*"
+    react-native: "*"
+  checksum: 10c0/d56d4a7fb83baa5d1aea1ad3fff3ef4a89ea6255b01300847fa558ee5f28f4ca3ddb3640858cb4c1bdac39f0d85f71930e0aa7699600fcb8dc8c2d60b56dafb9
   languageName: node
   linkType: hard
 
@@ -8991,8 +9013,10 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "react-native-lift-example@workspace:example"
   dependencies:
+    "@shopify/flash-list": "npm:2.3.2"
     expo: "npm:~58.0.17"
     expo-dev-client: "npm:~58.0.14"
+    expo-video: "npm:~58.0.12"
     react: "npm:19.3.0"
     react-native: "npm:0.88.0"
     react-native-builder-bob: "npm:^0.43.0"
@@ -9000,6 +9024,7 @@ __metadata:
     react-native-monorepo-config: "npm:^0.4.0"
     react-native-reanimated: "npm:4.7.1"
     react-native-teleport: "npm:1.2.2"
+    react-native-video: "npm:6.19.3"
     react-native-worklets: "npm:0.13.0"
   languageName: unknown
   linkType: soft
@@ -9073,6 +9098,16 @@ __metadata:
     react-dom: "*"
     react-native: "*"
   checksum: 10c0/5f82da01ea56924723399d8d5963f1299eb82ec151ab3c272d14812b8d32783cba3252a9adc622062c52b2bb2e398d9b6da743e0d87557406d16213f8f044e28
+  languageName: node
+  linkType: hard
+
+"react-native-video@npm:6.19.3":
+  version: 6.19.3
+  resolution: "react-native-video@npm:6.19.3"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  checksum: 10c0/8be544f985b9ed173ce0f67895230196095cc511b60ba7ff3a52ddb3633d2146a2cb89ea32666c73082374164cf1c8130212467ad71746486db4247ac739fcf3
   languageName: node
   linkType: hard
 

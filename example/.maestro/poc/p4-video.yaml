@@ -1,0 +1,18 @@
+# P4: playback survives re-parenting (expo-video, react-native-video).
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-video
+- extendedWaitUntil:
+    visible: idle
+    timeout: 10000
+- tapOn:
+    id: run-p4
+- extendedWaitUntil:
+    visible: "P4 done.*"
+    timeout: 60000
+- assertVisible: "P4 done expo:ok rnv:ok"

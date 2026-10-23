@@ -10,8 +10,10 @@ import {
   type Ref,
 } from 'react';
 import {
-  Dimensions,
+  Keyboard,
+  Pressable,
   StyleSheet,
+  TextInput,
   View,
   type HostInstance,
   type LayoutChangeEvent,
@@ -27,6 +29,7 @@ import Animated, {
 import { Portal, PortalHost, PortalProvider } from 'react-native-teleport';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { LiftHandle } from '../../types';
+import { isUsable, windowRect } from '../measure';
 
 const HOST_NAME = 'react-native-lift';
 
@@ -39,36 +42,72 @@ type HostContextValue = {
   // transform of its own and the re-parent lands on the same pixels.
   offsetX: SharedValue<number>;
   offsetY: SharedValue<number>;
+  claim: (handle: LiftHandle) => boolean;
+  release: (handle: LiftHandle) => void;
 };
 
 const HostContext = createContext<HostContextValue | null>(null);
+
+// The lifted slot's handle, or null. Separate from HostContext so only
+// consumers of it (scroll lock, backdrop) re-render on lift/drop.
+export const LiftContext = createContext<{ active: LiftHandle | null } | null>(
+  null
+);
 
 export function LiftHost({ children }: { children: ReactNode }) {
   const hostRef = useRef<HostInstance>(null);
   const offsetX = useSharedValue(0);
   const offsetY = useSharedValue(0);
+  const [active, setActive] = useState<LiftHandle | null>(null);
+  const activeRef = useRef<LiftHandle | null>(null);
   const layerStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }],
   }));
   const value = useMemo(
     () => ({
       // The outer view never moves; offsets are added explicitly.
-      getHostRect: () => hostRef.current?.getBoundingClientRect(),
+      getHostRect: () => windowRect(hostRef.current),
       offsetX,
       offsetY,
+      // ponytail: one lift at a time; a second slot's lift() is ignored until
+      // the first one has dropped. Step 2.2's state machine owns this later.
+      claim: (handle: LiftHandle) => {
+        if (activeRef.current && activeRef.current !== handle) {
+          return false;
+        }
+        activeRef.current = handle;
+        setActive(handle);
+        return true;
+      },
+      release: (handle: LiftHandle) => {
+        if (activeRef.current === handle) {
+          activeRef.current = null;
+          setActive(null);
+        }
+      },
     }),
     [offsetX, offsetY]
   );
+  const lift = useMemo(() => ({ active }), [active]);
   return (
     <PortalProvider>
       <HostContext.Provider value={value}>
-        {children}
+        <LiftContext.Provider value={lift}>{children}</LiftContext.Provider>
         <View
           ref={hostRef}
           style={StyleSheet.absoluteFill}
           pointerEvents="box-none"
           collapsable={false}
         >
+          {/* AC-E2: a tap outside the lifted view drops it. */}
+          {active && (
+            <Pressable
+              testID="lift-backdrop"
+              accessibilityLabel="lift-backdrop"
+              style={StyleSheet.absoluteFill}
+              onPress={() => active.drop()}
+            />
+          )}
           <Animated.View
             style={[StyleSheet.absoluteFill, layerStyle]}
             pointerEvents="box-none"
@@ -90,6 +129,9 @@ export type LiftSlotProps = {
   scale: SharedValue<number>;
   onLiftStart?: () => void;
   onLiftEnd?: () => void;
+  // AC-E6: refocus the input that had focus when lift dismissed the keyboard,
+  // unless something else took focus meanwhile. Default true.
+  restoreFocus?: boolean;
   ref?: Ref<LiftHandle>;
 };
 
@@ -103,21 +145,27 @@ export function LiftSlot({
   scale,
   onLiftStart,
   onLiftEnd,
+  restoreFocus = true,
   ref,
 }: LiftSlotProps) {
   const host = useContext(HostContext);
   if (!host) {
     throw new Error('react-native-lift: wrap your app in <LiftProvider>');
   }
-  const { getHostRect, offsetX, offsetY } = host;
+  const { getHostRect, offsetX, offsetY, claim, release } = host;
   const wrapperRef = useRef<HostInstance>(null);
   const size = useRef({ width: 0, height: 0 });
   const [lifted, setLifted] = useState<Lifted | null>(null);
   // Latest requested state, updated synchronously, so same-tick lift()/drop()
   // calls see each other instead of the last render's `lifted` (last call wins).
   const liftedRef = useRef<Lifted | null>(null);
-  // Bumped by every lift()/drop(); a pending drop continues only if current.
+  // Bumped by every lift()/drop(); a pending lift/drop continues only if current.
   const dropToken = useRef(0);
+  // Waiting for the keyboard to close before measuring (P6 "닫힘 대기").
+  const pendingLift = useRef(false);
+  const focused = useRef<HostInstance | null>(null);
+  // Stable identity: claim()/release() and the backdrop compare handles.
+  const api = useRef<LiftHandle | null>(null);
 
   const commit = (next: Lifted | null) => {
     liftedRef.current = next;
@@ -127,18 +175,9 @@ export function LiftSlot({
   // Host-layer offset that puts the lifted container over the wrapper, or
   // undefined when the wrapper is gone (0x0) or off screen.
   const target = (from: Lifted): Origin | undefined => {
-    const wrapper = wrapperRef.current?.getBoundingClientRect();
+    const wrapper = windowRect(wrapperRef.current);
     const hostRect = getHostRect();
-    const win = Dimensions.get('window');
-    if (
-      !wrapper ||
-      !hostRect ||
-      (wrapper.width === 0 && wrapper.height === 0) ||
-      wrapper.x + wrapper.width <= 0 ||
-      wrapper.y + wrapper.height <= 0 ||
-      wrapper.x >= win.width ||
-      wrapper.y >= win.height
-    ) {
+    if (!isUsable(wrapper) || !hostRect) {
       return undefined;
     }
     return {
@@ -184,51 +223,103 @@ export function LiftSlot({
     transform: [{ scale: scale.value }],
   }));
 
-  // Declared before the layout effect below so onLiftStart/onLiftEnd see the
-  // handle of the committed state.
-  useImperativeHandle(
-    ref,
-    () => ({
-      lift() {
-        if (liftedRef.current) {
-          // Already lifted, or mid drop: cancel the drop (its token no longer
-          // matches) and bring the layer back to the lift position.
-          dropToken.current++;
-          offsetX.value = withTiming(0);
-          offsetY.value = withTiming(0);
-          return;
+  const start = (token: number) => {
+    pendingLift.current = false;
+    const wrapper = windowRect(wrapperRef.current);
+    const hostRect = getHostRect();
+    // Cancelled while waiting, or no onLayout yet (would lock the wrapper to 0x0).
+    if (
+      token !== dropToken.current ||
+      !wrapper ||
+      !hostRect ||
+      size.current.width === 0
+    ) {
+      release(api.current!);
+      return;
+    }
+    // B1: one commit flips hostName, sets the host-local rect, and locks
+    // the wrapper to its untransformed onLayout size.
+    commit({
+      left: wrapper.x - hostRect.x,
+      top: wrapper.y - hostRect.y,
+      ...size.current,
+    });
+  };
+
+  // Created once; everything it calls reads refs, shared values or stable
+  // context functions, so first-render closures stay correct.
+  api.current ??= {
+    lift() {
+      if (liftedRef.current) {
+        // Already lifted, or mid drop: cancel the drop (its token no longer
+        // matches) and bring the layer back to the lift position.
+        dropToken.current++;
+        offsetX.value = withTiming(0);
+        offsetY.value = withTiming(0);
+        return;
+      }
+      if (pendingLift.current || !claim(api.current!)) {
+        return;
+      }
+      const token = ++dropToken.current;
+      if (!Keyboard.isVisible()) {
+        focused.current = null;
+        start(token);
+        return;
+      }
+      // Measure once the keyboard is gone and layout has settled: after the
+      // hide event, the wrapper at the same rect for 3 frames running (at most
+      // 30), then 3 more frames: the shadow tree settles a frame or two before
+      // the screen does (Android KeyboardAvoidingView). The timeout covers a
+      // dismiss that never reports.
+      focused.current = TextInput.State.currentlyFocusedInput() ?? null;
+      pendingLift.current = true;
+      let done = false;
+      const settled = (
+        prev: Origin | undefined,
+        still: number,
+        left: number
+      ) => {
+        const r = windowRect(wrapperRef.current);
+        const now = r && { x: r.x, y: r.y };
+        const n = now && prev && near(now, prev) ? still + 1 : 0;
+        if (n >= 2 || left === 0) {
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => start(token))
+            )
+          );
+        } else {
+          requestAnimationFrame(() => settled(now, n, left - 1));
         }
-        const wrapper = wrapperRef.current?.getBoundingClientRect();
-        const hostRect = getHostRect();
-        // No onLayout yet would lock the wrapper to 0x0.
-        if (!wrapper || !hostRect || size.current.width === 0) {
-          return;
+      };
+      const go = () => {
+        if (!done) {
+          done = true;
+          sub.remove();
+          clearTimeout(timer);
+          requestAnimationFrame(() => settled(undefined, 0, 30));
         }
-        // B1: one commit flips hostName, sets the host-local rect, and locks
-        // the wrapper to its untransformed onLayout size.
-        commit({
-          left: wrapper.x - hostRect.x,
-          top: wrapper.y - hostRect.y,
-          ...size.current,
-        });
-      },
-      drop({ immediate = false } = {}) {
-        const from = liftedRef.current;
-        if (!from) {
-          return;
-        }
-        const token = ++dropToken.current;
-        if (immediate) {
-          commit(null);
-          return;
-        }
-        settle(token, from);
-      },
-    }),
-    // commit/settle only touch refs, shared values and the stable setLifted.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getHostRect, offsetX, offsetY]
-  );
+      };
+      const sub = Keyboard.addListener('keyboardDidHide', go);
+      const timer = setTimeout(go, 1000);
+      Keyboard.dismiss();
+    },
+    drop({ immediate = false } = {}) {
+      const from = liftedRef.current;
+      const token = ++dropToken.current;
+      if (!from) {
+        // A pending (keyboard-wait) lift sees the new token and gives up.
+        return;
+      }
+      if (immediate) {
+        commit(null);
+        return;
+      }
+      settle(token, from);
+    },
+  };
+  useImperativeHandle(ref, () => api.current!, []);
 
   const isLifted = lifted !== null;
   const wasLifted = useRef(false);
@@ -243,13 +334,34 @@ export function LiftSlot({
     }
     // Runs after the re-parent commit, so the mount (queued first) has taken
     // the container out of the host before this reset lands; the host is
-    // empty by then and nothing visible moves.
-    // ponytail: one layer for all slots; a second slot lifting during another
-    // slot's drop animation would ride it. Step 2.2 (one lift at a time) closes it.
+    // empty by then and nothing visible moves. claim() keeps a second slot
+    // from lifting onto the layer before this.
     offsetX.value = 0;
     offsetY.value = 0;
+    release(api.current!);
+    const input = focused.current;
+    focused.current = null;
+    if (restoreFocus && input) {
+      // Two frames after the re-parent commit: the keyboard reopening moves
+      // layout, and that should not land in the commit frame.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (!TextInput.State.currentlyFocusedInput()) {
+            TextInput.State.focusTextInput(input);
+          }
+        })
+      );
+    }
     onLiftEnd?.();
-  }, [isLifted, onLiftStart, onLiftEnd, offsetX, offsetY]);
+  }, [
+    isLifted,
+    onLiftStart,
+    onLiftEnd,
+    offsetX,
+    offsetY,
+    release,
+    restoreFocus,
+  ]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     size.current = {

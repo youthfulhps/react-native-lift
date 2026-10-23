@@ -1,4 +1,4 @@
-import { createRef, memo, useEffect, useRef, useState } from 'react';
+import { createRef, memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -20,11 +20,13 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
-import { Liftable, useLiftRef } from 'react-native-lift';
+import { FlashList } from '@shopify/flash-list';
+import { Liftable, useLiftRef, useLiftScrollLock } from 'react-native-lift';
 import {
   cells,
   frames,
   gate,
+  lock,
   mounts,
   runAutoLoop,
   runMovedDrop,
@@ -37,7 +39,8 @@ const DATA = Array.from({ length: 120 }, (_, i) => i);
 
 type Kind = 'normal' | 'flex' | 'percent' | 'input';
 const KINDS: Kind[] = ['normal', 'flex', 'percent'];
-const kindOf = (i: number): Kind => (i === 3 ? 'input' : KINDS[i % 3]!);
+const kindOf = (i: number): Kind =>
+  i === 3 ? 'input' : KINDS[Math.abs(i) % 3]!;
 
 const liftableStyle: Record<Kind, StyleProp<ViewStyle>> = {
   normal: undefined,
@@ -58,8 +61,8 @@ const Cell = memo(function CellView({
   const cellRef = useRef<HostInstance>(null);
   const contentRef = useRef<HostInstance>(null);
   const scale = useSharedValue(1);
-  const marker = useAnimatedRef<View>();
-  const fill = useAnimatedRef<View>();
+  const marker = useAnimatedRef();
+  const fill = useAnimatedRef();
   const probe = useProbe(marker, fill);
   const [entry] = useState<CellEntry>(() => ({
     index,
@@ -144,12 +147,14 @@ const Cell = memo(function CellView({
 
 const inputRef = createRef<TextInputInstance>();
 
-type Scenario = 'autoLoop' | 'momentum' | 'settled' | 'scroll';
+type Scenario =
+  'autoLoop' | 'momentum' | 'settled' | 'update' | 'rebind' | 'scroll';
 type Job = {
   run: string;
   scenario: Scenario;
   clip: boolean;
   inverted: boolean;
+  flash: boolean;
 };
 
 // tag=<id>&jobs=c0i0-autoLoop,c1i0-settled,…  (c<clip>i<inverted>-<scenario>)
@@ -172,6 +177,8 @@ function parseSuite(spec: unknown): Job[] {
         scenario: scenario as Scenario,
         clip: combo[1] === '1',
         inverted: combo[3] === '1',
+        // c0i0f1: FlashList v2 instead of FlatList (P3).
+        flash: combo[5] === '1',
       };
     });
 }
@@ -182,8 +189,14 @@ const MOVED = { target: 21, base: 21 * ROW_H - 300, shift: 2 * ROW_H };
 
 export function FlatListScreen() {
   const list = useRef<FlatList<number>>(null);
+  const flashList = useRef<React.ComponentRef<typeof FlashList<number>>>(null);
   const [clipped, setClipped] = useState(false);
   const [inverted, setInverted] = useState(false);
+  const [flash, setFlash] = useState(false);
+  // Items inserted above the list while lifted ('update' scenario).
+  const [extra, setExtra] = useState(0);
+  const scrollEnabled = useLiftScrollLock();
+  lock.scrollEnabled = scrollEnabled;
   const [running, setRunning] = useState(false);
   const [active, setActive] = useState(0);
   // Also shown on screen: iOS release builds don't surface console.log.
@@ -194,6 +207,7 @@ export function FlatListScreen() {
     setStatus(`${job.scenario}…`);
     setClipped(job.clip);
     setInverted(job.inverted);
+    setFlash(job.flash);
     let result = 'error';
     try {
       // Let a toggled list re-render and settle before the first cycle.
@@ -202,14 +216,15 @@ export function FlatListScreen() {
       // First line of every run: ties logs/recordings to a commit and build.
       console.log(
         `POC START run=${job.run} scenario=${job.scenario} clip=${+job.clip} ` +
-          `inverted=${+job.inverted} sha=${
+          `inverted=${+job.inverted} flash=${+job.flash} sha=${
             process.env.EXPO_PUBLIC_GIT_SHA ?? 'unknown'
           } os=${Platform.OS} dev=${__DEV__} win=${win.width}x${win.height}`
       );
+      const ref = job.flash ? flashList : list;
       result =
         job.scenario === 'autoLoop' || job.scenario === 'scroll'
-          ? await runAutoLoop(list, setActive, job.scenario === 'autoLoop')
-          : await runMovedDrop(list, setActive, job.scenario, MOVED);
+          ? await runAutoLoop(ref, setActive, job.scenario === 'autoLoop')
+          : await runMovedDrop(ref, setActive, job.scenario, MOVED, setExtra);
     } finally {
       console.log(`POC END run=${job.run} result=${result}`);
       setStatus(result);
@@ -254,6 +269,14 @@ export function FlatListScreen() {
     return () => sub.remove();
   }, []);
 
+  const data = useMemo(
+    () => [...Array.from({ length: extra }, (_, i) => i - extra), ...DATA],
+    [extra]
+  );
+  const renderItem = ({ item }: { item: number }) => (
+    <Cell index={item} active={item === active} />
+  );
+
   return (
     <View style={styles.screen}>
       <View style={styles.bar}>
@@ -274,7 +297,13 @@ export function FlatListScreen() {
                 ? undefined
                 : () =>
                     runSuite([
-                      { run: 'manual', scenario, clip: clipped, inverted },
+                      {
+                        run: 'manual',
+                        scenario,
+                        clip: clipped,
+                        inverted,
+                        flash,
+                      },
                     ])
             }
           />
@@ -282,22 +311,33 @@ export function FlatListScreen() {
         <Text>{status}</Text>
         <Gate />
       </View>
-      <FlatList
-        ref={list}
-        data={DATA}
-        extraData={active}
-        keyExtractor={String}
-        removeClippedSubviews={clipped}
-        inverted={inverted}
-        getItemLayout={(_, i) => ({
-          length: ROW_H,
-          offset: ROW_H * i,
-          index: i,
-        })}
-        renderItem={({ item }) => (
-          <Cell index={item} active={item === active} />
-        )}
-      />
+      {flash ? (
+        <FlashList
+          ref={flashList}
+          data={data}
+          extraData={active}
+          keyExtractor={String}
+          inverted={inverted}
+          scrollEnabled={scrollEnabled}
+          renderItem={renderItem}
+        />
+      ) : (
+        <FlatList
+          ref={list}
+          data={data}
+          extraData={active}
+          keyExtractor={String}
+          removeClippedSubviews={clipped}
+          inverted={inverted}
+          scrollEnabled={scrollEnabled}
+          getItemLayout={(_, i) => ({
+            length: ROW_H,
+            offset: ROW_H * i,
+            index: i,
+          })}
+          renderItem={renderItem}
+        />
+      )}
     </View>
   );
 }
@@ -317,7 +357,7 @@ function Button({ title, onPress }: { title: string; onPress?: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingTop: 60 },
+  screen: { flex: 1 },
   bar: {
     flexDirection: 'row',
     flexWrap: 'wrap',

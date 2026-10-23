@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import type { View } from 'react-native';
 import {
   measure,
   useFrameCallback,
@@ -33,19 +32,37 @@ const median = (xs: number[]) => {
   return s[Math.floor(s.length / 2)] ?? NaN;
 };
 
+// Last run of >= 3 consecutive pre-window frames within 1dp of each other.
+// A static pre-window (Step 1.2) is one run; when the keyboard closing moves
+// the cell first (P6), only the settled tail counts.
+function settledTail(pre: Point[]): Point[] {
+  let end = pre.length;
+  for (let i = pre.length - 1; i > 0; i--) {
+    const [a, b] = [pre[i]!, pre[i - 1]!];
+    if (Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])) > 1) {
+      if (end - i >= 3) {
+        return pre.slice(i, end);
+      }
+      end = i;
+    }
+  }
+  return end >= 3 ? pre.slice(0, end) : pre;
+}
+
 function report(job: Job, container: number[] | null) {
-  // Median of the pre-window, so one stale frame that raced ahead of mark()
-  // (see ponytail note below) can't become the reference.
+  // Median of the settled pre-window, so one stale frame that raced ahead of
+  // mark() (see ponytail note below) can't become the reference.
+  const tail = settledTail(job.pre);
   const base: Point = [
-    median(job.pre.map((p) => p[0])),
-    median(job.pre.map((p) => p[1])),
+    median(tail.map((p) => p[0])),
+    median(tail.map((p) => p[1])),
   ];
   const { cycle, origin, layout } = job.ctx;
   const delta = ([x, y]: Point): Point => [x - base[0], y - base[1]];
   const size = ([dx, dy]: Point) => Math.max(Math.abs(dx), Math.abs(dy));
   // Settle (P2(b) rule, lift only): at most 2 consecutive frames starting at
-  // the commit (k=-1 or k=1) whose delta each equals the unapplied teleport
-  // offset (wrapperOrigin - hostOrigin) within 1dp. If either frame in the
+  // the commit (k=-1 or k=1) whose delta each equals +/- the teleport offset
+  // (wrapperOrigin - hostOrigin) within 1dp. If either frame in the
   // run fails the match, none is exempt. P2(a) for the same cycle is judged
   // separately from the recording.
   const frames: [number, Point][] = [
@@ -61,7 +78,14 @@ function report(job: Job, container: number[] | null) {
       if (size([dx, dy]) <= 1) {
         break;
       }
-      if (size([dx - origin.x, dy - origin.y]) > 1) {
+      // The lagging commit shows up with either sign: offset applied twice
+      // (+origin, Step 1.2) or not yet applied, container transform included
+      // (-origin, P6), so each axis also allows the 0.95 press displacement.
+      const tol = (v: number, half: number) => Math.abs(v) <= 1 + 0.05 * half;
+      const fits = (sign: number) =>
+        tol(dx - sign * origin.x, layout.width / 2) &&
+        tol(dy - sign * origin.y, layout.height / 2);
+      if (!fits(1) && !fits(-1)) {
         settle.clear();
         break;
       }
@@ -94,10 +118,7 @@ function report(job: Job, container: number[] | null) {
  * `container` is an absoluteFill child of the lifted container; its measure
  * equals the container's own and is logged once per lift for P9.
  */
-export function useProbe(
-  marker: AnimatedRef<View>,
-  container: AnimatedRef<View>
-) {
+export function useProbe(marker: AnimatedRef, container: AnimatedRef) {
   const ring = useSharedValue<Point[]>([]);
   const job = useSharedValue<Job | null>(null);
 

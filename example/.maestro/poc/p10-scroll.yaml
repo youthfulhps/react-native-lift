@@ -1,0 +1,53 @@
+# P10 config (i) on one list kind (env KIND = ScrollView | FlatList | FlashList).
+# 20 scroll gestures must never lift; after 20 confirmed long presses the
+# list must not scroll.
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-scroll
+- tapOn:
+    id: kind-${KIND}
+- assertVisible: "lifts:0 lifted:0"
+- repeat:
+    times: 5
+    commands:
+      - swipe:
+          start: "50%, 80%"
+          end: "50%, 40%"
+          duration: 300
+      - swipe:
+          start: "50%, 40%"
+          end: "50%, 80%"
+          duration: 300
+      # Slow drags: the finger leaves maxDistance before minDuration.
+      - swipe:
+          start: "50%, 80%"
+          end: "50%, 40%"
+          duration: 2000
+      - swipe:
+          start: "50%, 40%"
+          end: "50%, 80%"
+          duration: 2000
+- assertVisible: "lifts:0 lifted:0"
+- repeat:
+    times: 20
+    commands:
+      - longPressOn:
+          point: "50%, 60%"
+      - assertVisible: "lifts:\\d+ lifted:1"
+      - copyTextFrom:
+          id: conflict-y
+      - swipe:
+          start: "50%, 80%"
+          end: "50%, 40%"
+          duration: 300
+      - assertVisible:
+          id: conflict-y
+          text: ${maestro.copiedText}
+      - tapOn:
+          point: "50%, 95%"
+      - assertVisible: "lifts:\\d+ lifted:0"

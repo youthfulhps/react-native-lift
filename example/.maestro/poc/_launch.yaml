@@ -1,0 +1,6 @@
+# Fresh process (release builds). Debug runs skip this: the dev client is
+# already connected to Metro.
+appId: lift.example
+---
+- launchApp:
+    stopApp: true

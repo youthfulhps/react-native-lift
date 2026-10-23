@@ -1,0 +1,30 @@
+# P5: Pressable onPress and RNGH pan onUpdate inside the lifted view.
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-gestures
+- repeat:
+    times: 3
+    commands:
+      - longPressOn:
+          id: lift-card
+      - assertVisible: "pressed:\\d+ pan:\\w+ lifted:1"
+      - copyTextFrom:
+          id: gesture-status
+      - tapOn:
+          id: inner-button
+      - assertNotVisible: ${maestro.copiedText}
+      - assertVisible: "pressed:[1-9]\\d* pan:\\w+ lifted:1"
+      - swipe:
+          from:
+            id: pan-area
+          direction: RIGHT
+      - assertVisible: "pressed:[1-9]\\d* pan:yes lifted:1"
+      # Backdrop tap well below the card drops it.
+      - tapOn:
+          point: "50%,92%"
+      - assertVisible: "pressed:[1-9]\\d* pan:yes lifted:0"

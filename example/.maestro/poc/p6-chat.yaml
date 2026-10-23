@@ -1,0 +1,61 @@
+# P6: long-press a message while the keyboard is open. env AUTO = off | one
+# | flood (messages arriving while lifted), ROUNDS. The screen drops by
+# itself 4.5s after the lift; focus must come back to the input.
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-chat
+- runFlow:
+    when:
+      true: ${AUTO != "off"}
+    commands:
+      - tapOn:
+          id: auto-toggle
+- runFlow:
+    when:
+      true: ${AUTO == "flood"}
+    commands:
+      - tapOn:
+          id: auto-toggle
+- assertVisible: "auto:${AUTO}"
+- tapOn:
+    id: chat-input
+- inputText: "hello"
+- repeat:
+    times: ${ROUNDS}
+    commands:
+      - assertVisible:
+          id: chat-lifted
+          text: "lifted:0"
+      - assertVisible:
+          id: chat-focus
+          text: "focus:yes"
+      # The keyboard (and the layout above it) must be done moving, or the
+      # press lands where the target used to be. (Capped: a blinking cursor
+      # never stops animating.)
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - longPressOn:
+          id: lift-target
+      # Lifted, dropped by the screen 4.5s later, focus restored.
+      - extendedWaitUntil:
+          visible:
+            id: chat-focus
+            text: "focus:yes"
+          timeout: 10000
+      - extendedWaitUntil:
+          visible:
+            id: chat-lifted
+            text: "lifted:0"
+          timeout: 10000
+      - assertVisible:
+          id: chat-input
+          text: "hello"
+# Every round lifted (a transient lifted:1 is racy to catch).
+- assertVisible:
+    id: chat-lifts
+    text: "lifts:${ROUNDS}"

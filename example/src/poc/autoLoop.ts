@@ -1,5 +1,4 @@
 import type { RefObject } from 'react';
-import type { FlatList } from 'react-native';
 import {
   makeMutable,
   withSpring,
@@ -25,6 +24,21 @@ export type CellEntry = {
   onLiftStart?: () => void;
   onLiftEnd?: () => void;
 };
+
+// FlatList and FlashList share the two scroll calls the harness uses.
+export type ListRef = RefObject<{
+  scrollToOffset(p: { offset: number; animated?: boolean }): void;
+  scrollToIndex(p: {
+    index: number;
+    viewPosition?: number;
+    animated?: boolean;
+  }): void;
+} | null>;
+
+export type MovedMode = 'momentum' | 'settled' | 'update' | 'rebind';
+
+// Mirrors useLiftScrollLock() on the screen: true once no view is lifted.
+export const lock = { scrollEnabled: true };
 
 // Written by the cells in FlatListScreen.
 export const cells = new Map<number, CellEntry>();
@@ -100,7 +114,7 @@ const near = (a: Rect, b: Rect) =>
   Math.abs(a.height - b.height) <= 1;
 
 export async function runAutoLoop(
-  list: RefObject<FlatList<number> | null>,
+  list: ListRef,
   setActive: (index: number) => void,
   // false: same targets and scrolls, no lift/drop (crash triage control).
   lift = true
@@ -147,18 +161,40 @@ export async function runAutoLoop(
 const MOVED_CYCLES = 10;
 
 /**
- * Step 1.2 drop-while-moved scenarios: lift, scroll the list by `shift`
- * (animated), then drop either while the scroll is still running ('momentum')
- * or after it has stopped ('settled'). The drop takes the re-measure +
- * animated path; pixel-check judges the commit frame, this asserts the end
- * state (no leftover translate, no remount).
+ * Drop-after-move scenarios. While lifted the target's slot moves:
+ * - momentum / settled (Step 1.2): animated scroll by `shift`, drop 4 frames
+ *   in or after it stops.
+ * - update (P3/P6): 2 items inserted above the target.
+ * - rebind (P3): scrolled 40 rows away so the list can recycle the slot; the
+ *   drop must commit immediately (target off screen) and leave nothing lifted.
+ * pixel-check judges the windows (not rebind: its drop is an allowed jump);
+ * this asserts the end state (content back in its cell, no remount).
  */
 export async function runMovedDrop(
-  list: RefObject<FlatList<number> | null>,
+  list: ListRef,
   setActive: (index: number) => void,
-  mode: 'momentum' | 'settled',
-  { target, base, shift }: { target: number; base: number; shift: number }
+  mode: MovedMode,
+  { target, base, shift }: { target: number; base: number; shift: number },
+  setExtra: (n: number) => void
 ): Promise<string> {
+  const move = async () => {
+    if (mode === 'update') {
+      setExtra(2);
+      await frames(60);
+      return;
+    }
+    if (mode === 'rebind') {
+      list.current?.scrollToOffset({
+        offset: base + 40 * shift,
+        animated: false,
+      });
+      await frames(30);
+      return;
+    }
+    list.current?.scrollToOffset({ offset: base + shift, animated: true });
+    // 'momentum': drop a few frames into the animated scroll.
+    await frames(mode === 'momentum' ? 4 : 60);
+  };
   let failures = 0;
   setActive(target);
   for (let cycle = 0; cycle < MOVED_CYCLES; cycle++) {
@@ -181,22 +217,29 @@ export async function runMovedDrop(
         reason = 'no-lift-start';
       } else {
         await springTo1(entry.scale);
-        // The window spans the scroll too: the lifted marker must hold still.
+        // The window spans the move too: the lifted marker must hold still.
         const dropped = await transition(async () => {
-          list.current?.scrollToOffset({
-            offset: base + shift,
-            animated: true,
-          });
-          // 'momentum': drop a few frames into the animated scroll.
-          await frames(mode === 'momentum' ? 4 : 60);
+          await move();
           return until(entry, 'onLiftEnd', () => entry.handle.current?.drop());
         }, HOLD * 3);
+        if (mode === 'rebind') {
+          console.log(
+            `REBIND cycle=${cycle} slotIndexAtDrop=${entry.index} ` +
+              `lockReleased=${lock.scrollEnabled}`
+          );
+          list.current?.scrollToOffset({ offset: base, animated: false });
+          await frames(HOLD * 2);
+        }
         if (!dropped) {
           reason = 'no-lift-end';
+        } else if (!lock.scrollEnabled) {
+          reason = 'still-lifted';
         } else {
-          const content = entry.rect();
-          const cell = entry.cellRect();
-          if (mounts.get(target) !== mountsBefore) {
+          // rebind: the list may have handed the target a different cell.
+          const now = cells.get(target) ?? entry;
+          const content = now.rect();
+          const cell = now.cellRect();
+          if (mode !== 'rebind' && mounts.get(target) !== mountsBefore) {
             reason = 'remounted';
           } else if (
             !content ||
@@ -209,6 +252,7 @@ export async function runMovedDrop(
         }
       }
     }
+    setExtra(0);
     if (reason !== 'none') {
       failures++;
     }
