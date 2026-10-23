@@ -132,7 +132,17 @@ export type LiftSlotProps = {
   // AC-E6: refocus the input that had focus when lift dismissed the keyboard,
   // unless something else took focus meanwhile. Default true.
   restoreFocus?: boolean;
-  ref?: Ref<LiftHandle>;
+  // Internal: an accepted lift that never committed (cancelled or failed
+  // during the keyboard wait).
+  onLiftCancel?: () => void;
+  ref?: Ref<SlotHandle>;
+};
+
+// Internal: lift() also says whether it was accepted, so the gesture can
+// undo its press scale when it was not.
+export type SlotHandle = {
+  lift(): boolean;
+  drop(opts?: { immediate?: boolean }): void;
 };
 
 const near = (a: Origin, b: Origin) =>
@@ -146,6 +156,7 @@ export function LiftSlot({
   onLiftStart,
   onLiftEnd,
   restoreFocus = true,
+  onLiftCancel,
   ref,
 }: LiftSlotProps) {
   const host = useContext(HostContext);
@@ -163,9 +174,33 @@ export function LiftSlot({
   const dropToken = useRef(0);
   // Waiting for the keyboard to close before measuring (P6 "닫힘 대기").
   const pendingLift = useRef(false);
+  // Token the pending lift commits under; a lift() during the wait refreshes
+  // it (last call wins), a drop() leaves it stale (cancel).
+  const pendingToken = useRef(0);
+  const keyboardWait = useRef<(() => void) | null>(null);
   const focused = useRef<HostInstance | null>(null);
+  const mounted = useRef(true);
+  // Read through refs: the once-created api closure calls restore/start.
+  const latest = useRef({ restoreFocus, onLiftCancel });
+  latest.current = { restoreFocus, onLiftCancel };
   // Stable identity: claim()/release() and the backdrop compare handles.
-  const api = useRef<LiftHandle | null>(null);
+  const api = useRef<SlotHandle | null>(null);
+
+  // Two frames later: the keyboard reopening moves layout, and that should
+  // not land in a commit frame.
+  const restore = () => {
+    const input = focused.current;
+    focused.current = null;
+    if (latest.current.restoreFocus && input) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (mounted.current && !TextInput.State.currentlyFocusedInput()) {
+            TextInput.State.focusTextInput(input);
+          }
+        })
+      );
+    }
+  };
 
   const commit = (next: Lifted | null) => {
     liftedRef.current = next;
@@ -225,6 +260,7 @@ export function LiftSlot({
 
   const start = (token: number) => {
     pendingLift.current = false;
+    keyboardWait.current = null;
     const wrapper = windowRect(wrapperRef.current);
     const hostRect = getHostRect();
     // Cancelled while waiting, or no onLayout yet (would lock the wrapper to 0x0).
@@ -235,6 +271,9 @@ export function LiftSlot({
       size.current.width === 0
     ) {
       release(api.current!);
+      // The keyboard was dismissed for nothing: give focus back.
+      restore();
+      latest.current.onLiftCancel?.();
       return;
     }
     // B1: one commit flips hostName, sets the host-local rect, and locks
@@ -256,16 +295,20 @@ export function LiftSlot({
         dropToken.current++;
         offsetX.value = withTiming(0);
         offsetY.value = withTiming(0);
-        return;
+        return true;
       }
-      if (pendingLift.current || !claim(api.current!)) {
-        return;
+      if (pendingLift.current) {
+        pendingToken.current = ++dropToken.current;
+        return true;
+      }
+      if (!claim(api.current!)) {
+        return false;
       }
       const token = ++dropToken.current;
       if (!Keyboard.isVisible()) {
         focused.current = null;
         start(token);
-        return;
+        return liftedRef.current !== null;
       }
       // Measure once the keyboard is gone and layout has settled: after the
       // hide event, the wrapper at the same rect for 3 frames running (at most
@@ -274,6 +317,7 @@ export function LiftSlot({
       // dismiss that never reports.
       focused.current = TextInput.State.currentlyFocusedInput() ?? null;
       pendingLift.current = true;
+      pendingToken.current = token;
       let done = false;
       const settled = (
         prev: Origin | undefined,
@@ -286,7 +330,7 @@ export function LiftSlot({
         if (n >= 2 || left === 0) {
           requestAnimationFrame(() =>
             requestAnimationFrame(() =>
-              requestAnimationFrame(() => start(token))
+              requestAnimationFrame(() => start(pendingToken.current))
             )
           );
         } else {
@@ -303,7 +347,12 @@ export function LiftSlot({
       };
       const sub = Keyboard.addListener('keyboardDidHide', go);
       const timer = setTimeout(go, 1000);
+      keyboardWait.current = () => {
+        sub.remove();
+        clearTimeout(timer);
+      };
       Keyboard.dismiss();
+      return true;
     },
     drop({ immediate = false } = {}) {
       const from = liftedRef.current;
@@ -320,6 +369,30 @@ export function LiftSlot({
     },
   };
   useImperativeHandle(ref, () => api.current!, []);
+
+  // Unmounted while lifted, mid-drop or waiting for the keyboard: nothing
+  // will commit null for us, so free the host (backdrop, scroll lock, other
+  // slots' claims) here.
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // A counter, not a node ref: bumping the latest value is the point.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      dropToken.current++;
+      keyboardWait.current?.();
+      pendingLift.current = false;
+      if (liftedRef.current) {
+        offsetX.value = 0;
+        offsetY.value = 0;
+        // No-op on a real unmount; on a hide/re-show (Fast Refresh, Suspense,
+        // Activity) the isLifted effect then drops cleanly.
+        commit(null);
+      }
+      release(api.current!);
+    };
+    // commit only touches a ref and the stable setLifted.
+  }, [offsetX, offsetY, release]);
 
   const isLifted = lifted !== null;
   const wasLifted = useRef(false);
@@ -339,29 +412,10 @@ export function LiftSlot({
     offsetX.value = 0;
     offsetY.value = 0;
     release(api.current!);
-    const input = focused.current;
-    focused.current = null;
-    if (restoreFocus && input) {
-      // Two frames after the re-parent commit: the keyboard reopening moves
-      // layout, and that should not land in the commit frame.
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          if (!TextInput.State.currentlyFocusedInput()) {
-            TextInput.State.focusTextInput(input);
-          }
-        })
-      );
-    }
+    restore();
     onLiftEnd?.();
-  }, [
-    isLifted,
-    onLiftStart,
-    onLiftEnd,
-    offsetX,
-    offsetY,
-    release,
-    restoreFocus,
-  ]);
+    // restore() reads restoreFocus from this render.
+  }, [isLifted, onLiftStart, onLiftEnd, offsetX, offsetY, release]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     size.current = {
