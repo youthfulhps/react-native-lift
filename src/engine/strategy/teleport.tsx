@@ -184,7 +184,9 @@ export function LiftSlot({
   const size = useRef({ width: 0, height: 0 });
   const [lifted, setLifted] = useState<Lifted | null>(null);
   // Latest requested state, updated synchronously, so same-tick lift()/drop()
-  // calls see each other instead of the last render's `lifted` (last call wins).
+  // calls see each other instead of the last render's `lifted`. lift() then
+  // drop() ends dropped; drop() then lift() of an unmoved view also ends
+  // dropped (the re-lift is rejected until the drop has rendered).
   const liftedRef = useRef<Lifted | null>(null);
   // Bumped by every lift()/drop(); a pending lift/drop continues only if current.
   const dropToken = useRef(0);
@@ -322,6 +324,9 @@ export function LiftSlot({
       latest.current.onLiftCancel?.();
       return;
     }
+    // The layer is ours now; clear what a drop cut short by an unmount left.
+    offsetX.value = 0;
+    offsetY.value = 0;
     // B1: one commit flips hostName, sets the host-local rect, and locks
     // the wrapper to its untransformed onLayout size.
     commit({
@@ -353,9 +358,6 @@ export function LiftSlot({
         pendingToken.current = ++dropToken.current;
         return true;
       }
-      // The layer is ours; clear whatever a drop cut short by an unmount left.
-      offsetX.value = 0;
-      offsetY.value = 0;
       const token = ++dropToken.current;
       if (!Keyboard.isVisible()) {
         focused.current = null;
@@ -486,10 +488,13 @@ export function LiftSlot({
     // Runs after the re-parent commit, so the mount (queued first) has taken
     // the container out of the host before this reset lands; the host is
     // empty by then and nothing visible moves. The machine keeps a second
-    // slot from lifting onto the layer before 'dropped'.
-    offsetX.value = 0;
-    offsetY.value = 0;
-    send({ type: 'dropped', slot: me() });
+    // slot from lifting onto the layer before 'dropped'. Not when another
+    // slot owns the layer (an Activity re-show of a slot dropped while
+    // hidden): that would cut its drop animation.
+    if (send({ type: 'dropped', slot: me() }).phase === 'idle') {
+      offsetX.value = 0;
+      offsetY.value = 0;
+    }
     restore();
     onLiftEnd?.();
     // restore() and commit() read refs and stable context functions.
