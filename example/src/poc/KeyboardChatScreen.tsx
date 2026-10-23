@@ -11,12 +11,14 @@ import {
   type HostInstance,
 } from 'react-native';
 import Animated, {
+  useAnimatedReaction,
   useAnimatedRef,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
 import { Liftable, useLiftRef, useLiftScrollLock } from 'react-native-lift';
+import { scheduleOnRN } from 'react-native-worklets';
 import { frames, gate } from './autoLoop';
 import { useProbe, type ProbeCtx } from './probe';
 
@@ -29,6 +31,9 @@ import { useProbe, type ProbeCtx } from './probe';
 // up a row per round (3 rounds).
 const TARGET = 1;
 const HOLD = 12;
+// useLiftGesture's minDuration: the long press activates this long after its
+// onBegin, which starts the press scale.
+const MIN_DURATION = 400;
 type Auto = 'off' | 'one' | 'flood';
 const AUTOS: Auto[] = ['off', 'one', 'flood'];
 
@@ -79,6 +84,20 @@ const Message = memo(function MessageView({
   // (the shadow tree lags the commit there).
   const before = useRef<{ x: number; y: number } | undefined>(undefined);
   const isTarget = id === TARGET;
+  // Felt latency (long press activated -> onLiftStart): the first frame the
+  // press scale leaves 1 is onBegin (+<=1 frame), stamped on the UI thread.
+  const press = useRef({ at: 0, keyboard: false, hiddenAt: 0 });
+  const pressed = useCallback((at: number) => {
+    press.current = { at, keyboard: Keyboard.isVisible(), hiddenAt: 0 };
+  }, []);
+  useAnimatedReaction(
+    () => scale.value < 1,
+    (down, was) => {
+      if (down && !was) {
+        scheduleOnRN(pressed, Date.now());
+      }
+    }
+  );
   useEffect(() => {
     probe.setActive(isTarget);
     return () => probe.setActive(false);
@@ -93,6 +112,7 @@ const Message = memo(function MessageView({
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const sub = Keyboard.addListener('keyboardDidHide', async () => {
+      press.current.hiddenAt = Date.now();
       // Same rule as the engine (same rect 3 frames running), then 2 of the
       // engine's 3 extra frames: the window opens just before the commit.
       // `before` keeps the latest pre-commit rect.
@@ -130,6 +150,15 @@ const Message = memo(function MessageView({
         const r = content.current?.getBoundingClientRect();
         const origin = before.current ?? (r && { x: r.x, y: r.y });
         before.current = undefined;
+        if (isTarget) {
+          const { at, keyboard, hiddenAt } = press.current;
+          const activated = at + MIN_DURATION;
+          console.log(
+            `P6 LATENCY keyboard=${keyboard ? 'open' : 'closed'} ` +
+              `ms=${Date.now() - activated}` +
+              (hiddenAt ? ` didHide=${hiddenAt - activated}` : '')
+          );
+        }
         if (isTarget && origin) {
           ctx.current = {
             cycle: cycleNo++,

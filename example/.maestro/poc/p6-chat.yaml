@@ -1,7 +1,10 @@
 # P6: long-press a message while the keyboard is open. env AUTO = off | one
-# | flood (messages arriving while lifted), ROUNDS. The screen drops by
-# itself 4.5s after the lift; focus must come back to the input.
+# | flood (messages arriving while lifted), ROUNDS, KB = 1 (default) | 0
+# (keyboard closed: the input is never focused). The screen drops by itself
+# 4.5s after the lift; focus must come back to the input.
 appId: lift.example
+env:
+  KB: ${KB || "1"}
 ---
 - runFlow:
     when:
@@ -23,8 +26,12 @@ appId: lift.example
           id: auto-toggle
 - assertVisible: "auto:${AUTO}"
 # The input is pre-filled with "hello" (Maestro's iOS inputText hangs).
-- tapOn:
-    id: chat-input
+- runFlow:
+    when:
+      true: ${KB == "1"}
+    commands:
+      - tapOn:
+          id: chat-input
 - repeat:
     times: ${ROUNDS}
     commands:
@@ -33,7 +40,7 @@ appId: lift.example
           text: "lifted:0"
       - assertVisible:
           id: chat-focus
-          text: "focus:yes"
+          text: '${KB == "1" ? "focus:yes" : "focus:no"}'
       # The keyboard (and the layout above it) must be done moving, or the
       # press lands where the target used to be. (Capped: a blinking cursor
       # never stops animating.)
@@ -45,7 +52,7 @@ appId: lift.example
       - extendedWaitUntil:
           visible:
             id: chat-focus
-            text: "focus:yes"
+            text: '${KB == "1" ? "focus:yes" : "focus:no"}'
           timeout: 10000
       - extendedWaitUntil:
           visible:

@@ -52,7 +52,7 @@ class Log:
     def _pump(self):
         for line in self.proc.stdout:
             # Keep only the PoC payload (drops the os_log / logcat prefix).
-            m = re.search(r'(POC |AUTOLOOP |MOVED |PROBE|P4 |REBIND )', line)
+            m = re.search(r'(POC |AUTOLOOP |MOVED |PROBE|P4 |P6 |REBIND )', line)
             if m:
                 payload = line[m.start():].rstrip()
                 self.lines.append(payload)
@@ -273,7 +273,7 @@ def run_maestro(a):
         v.update({'probe_lines': len(probes),
                   'settle_frames': sum(p[4] == 'true' for p in probes),
                   'probe_over': [' '.join(p) for p in over + settle_bad]})
-    v['other'] = [x for x in lines if x.startswith(('P4 ', 'REBIND '))]
+    v['other'] = [x for x in lines if x.startswith(('P4 ', 'P6 ', 'REBIND '))]
     json.dump(v, open(os.path.join(a.out, 'verdict.json'), 'w'), indent=2)
     print(f"{v['flow']} {' '.join(a.env)}: maestro_ok={v['maestro_ok']} "
           f"windows={v.get('windows', '-')} flags={len(v.get('pixel_flags', []))} "
