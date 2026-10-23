@@ -39,9 +39,22 @@ const HOLD = 12;
 // Give up waiting for a lift/drop commit after this many frames.
 const TIMEOUT = 120;
 
-// 1 while a cycle's measurement window is open. Drives the cyan gate square
-// that poc-auto.py uses to map recording frames to log cycles.
+// 1 while a measurement window is open. Drives the cyan gate square that
+// poc-auto.py uses to map recording frames to log cycles.
 export const gate = makeMutable(0);
+
+// One window per teleport transition (lift, then drop): P2 judges these, not
+// the intended press/spring motion between them. Cycle n = windows 2n, 2n+1.
+async function transition<T>(act: () => Promise<T>, after: number) {
+  gate.value = 1;
+  await frames(3);
+  const result = await act();
+  await frames(after);
+  gate.value = 0;
+  // Static frames after the gate so its off-frame shows no other motion.
+  await frames(10);
+  return result;
+}
 
 // Pressed-state scale. Timed, not instant, so pixel-check sees smooth motion.
 const press = (scale: SharedValue<number>) =>
@@ -88,7 +101,9 @@ const near = (a: Rect, b: Rect) =>
 
 export async function runAutoLoop(
   list: RefObject<FlatList<number> | null>,
-  setActive: (index: number) => void
+  setActive: (index: number) => void,
+  // false: same targets and scrolls, no lift/drop (crash triage control).
+  lift = true
 ): Promise<string> {
   let failures = 0;
   list.current?.scrollToOffset({ offset: 0, animated: false });
@@ -114,12 +129,7 @@ export async function runAutoLoop(
       await frames(HOLD);
     }
 
-    gate.value = 1;
-    await frames(3);
-    const reason = await runCycle(cycle, target);
-    gate.value = 0;
-    // Static frames after the gate so its off-frame shows no other motion.
-    await frames(10);
+    const reason = lift ? await runCycle(cycle, target) : 'none';
     if (reason !== 'none') {
       failures++;
     }
@@ -160,25 +170,30 @@ export async function runMovedDrop(
     if (!entry) {
       reason = 'not-mounted';
     } else {
-      gate.value = 1;
-      await frames(3);
       press(entry.scale);
       await frames(HOLD + PRESS_FRAMES);
       if (
-        !(await until(entry, 'onLiftStart', () => entry.handle.current?.lift()))
+        !(await transition(
+          () => until(entry, 'onLiftStart', () => entry.handle.current?.lift()),
+          HOLD
+        ))
       ) {
         reason = 'no-lift-start';
       } else {
         await springTo1(entry.scale);
-        list.current?.scrollToOffset({ offset: base + shift, animated: true });
-        // 'momentum': drop a few frames into the animated scroll.
-        await frames(mode === 'momentum' ? 4 : 60);
-        if (
-          !(await until(entry, 'onLiftEnd', () => entry.handle.current?.drop()))
-        ) {
+        // The window spans the scroll too: the lifted marker must hold still.
+        const dropped = await transition(async () => {
+          list.current?.scrollToOffset({
+            offset: base + shift,
+            animated: true,
+          });
+          // 'momentum': drop a few frames into the animated scroll.
+          await frames(mode === 'momentum' ? 4 : 60);
+          return until(entry, 'onLiftEnd', () => entry.handle.current?.drop());
+        }, HOLD * 3);
+        if (!dropped) {
           reason = 'no-lift-end';
         } else {
-          await frames(HOLD * 3);
           const content = entry.rect();
           const cell = entry.cellRect();
           if (mounts.get(target) !== mountsBefore) {
@@ -194,9 +209,6 @@ export async function runMovedDrop(
         }
       }
     }
-    gate.value = 0;
-    // Static frames after the gate so its off-frame shows no other motion.
-    await frames(10);
     if (reason !== 'none') {
       failures++;
     }
@@ -228,18 +240,24 @@ async function runCycle(cycle: number, target: number): Promise<string> {
   // Longer than the probe's 10-frame pre-window, so it only sees the scaled pose.
   await frames(HOLD + PRESS_FRAMES);
   if (
-    !(await until(entry, 'onLiftStart', () => entry.handle.current?.lift()))
+    !(await transition(
+      () => until(entry, 'onLiftStart', () => entry.handle.current?.lift()),
+      HOLD
+    ))
   ) {
     return 'no-lift-start';
   }
-  await frames(HOLD);
   await springTo1(entry.scale);
   // Quiet window so the drop's pre-commit probe frames carry no animation.
   await frames(HOLD);
-  if (!(await until(entry, 'onLiftEnd', () => entry.handle.current?.drop()))) {
+  if (
+    !(await transition(
+      () => until(entry, 'onLiftEnd', () => entry.handle.current?.drop()),
+      HOLD
+    ))
+  ) {
     return 'no-lift-end';
   }
-  await frames(HOLD);
 
   const after = entry.rect();
   if (cells.get(target) !== entry || entry.index !== target) {

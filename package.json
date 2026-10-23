@@ -50,14 +50,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/example/react-native-lift.git"
+    "url": "git+https://github.com/youthfulhps/react-native-lift.git"
   },
   "author": "youthfulhps <ybh942002@gmail.com> (https://github.com/youthfulhps)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/example/react-native-lift/issues"
+    "url": "https://github.com/youthfulhps/react-native-lift/issues"
   },
-  "homepage": "https://github.com/example/react-native-lift#readme",
+  "homepage": "https://github.com/youthfulhps/react-native-lift#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },

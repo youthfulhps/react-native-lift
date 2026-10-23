@@ -144,7 +144,7 @@ const Cell = memo(function CellView({
 
 const inputRef = createRef<TextInputInstance>();
 
-type Scenario = 'autoLoop' | 'momentum' | 'settled';
+type Scenario = 'autoLoop' | 'momentum' | 'settled' | 'scroll';
 type Job = {
   run: string;
   scenario: Scenario;
@@ -207,8 +207,8 @@ export function FlatListScreen() {
           } os=${Platform.OS} dev=${__DEV__} win=${win.width}x${win.height}`
       );
       result =
-        job.scenario === 'autoLoop'
-          ? await runAutoLoop(list, setActive)
+        job.scenario === 'autoLoop' || job.scenario === 'scroll'
+          ? await runAutoLoop(list, setActive, job.scenario === 'autoLoop')
           : await runMovedDrop(list, setActive, job.scenario, MOVED);
     } finally {
       console.log(`POC END run=${job.run} result=${result}`);
@@ -280,6 +280,7 @@ export function FlatListScreen() {
           />
         ))}
         <Text>{status}</Text>
+        <Gate />
       </View>
       <FlatList
         ref={list}
@@ -297,7 +298,6 @@ export function FlatListScreen() {
           <Cell index={item} active={item === active} />
         )}
       />
-      <Gate />
     </View>
   );
 }
@@ -347,10 +347,7 @@ const styles = StyleSheet.create({
   },
   markerActive: { backgroundColor: '#FF00FF' },
   gate: {
-    position: 'absolute',
-    // Bottom-right: clear of the dev-client button and the left-edge marker.
-    right: 8,
-    bottom: 48,
+    // In the toolbar: a lifted cell (drawn above everything) never reaches it.
     width: 16,
     height: 16,
     backgroundColor: '#00FFFF',

@@ -14,7 +14,7 @@ in log order) and one FLAG line per bad frame inside a window:
   jump     |d_i| > tol and |v_i| > tol + 2*max(|v_i-1|, |v_i+1|)
   spike    d_i . d_i+1 < 0 and min(|d_i|, |d_i+1|) > tol + 2*max(|v_i-1|, |v_i+2|)
 d_i is the marker displacement into frame i (dp, max-abs norm), v_i the same
-scaled to one 60Hz frame (VFR-safe). Smooth motion (press, spring, scroll,
+scaled to one 60Hz frame (VFR-safe; intervals under one frame count as one). Smooth motion (press, spring, scroll,
 drop animation) changes velocity gradually and passes; a teleport or a
 one-frame excursion does not.
 Warnings go to stderr. Always exits 0: it reports numbers, people judge them.
@@ -122,8 +122,9 @@ def check(args):
             print(f'WARN bits/pixel/frame={bpp:.3f} < {MIN_BITS_PER_PIXEL}: '
                   'low bitrate smears the marker', file=sys.stderr)
 
-    # Pure Python decodes at half size to stay usable; numpy uses full size.
-    down = 1 if np is not None else 2
+    # Half size: 1dp is still >= 1.5px on a 3x screen and the centroid is
+    # sub-pixel, at a quarter of the decode cost. Pure Python goes to 1/4.
+    down = args.down if np is not None else max(args.down, 4)
     w, h = vw // down, vh // down
     px_per_dp = vw / args.screen_width_dp
     if args.windows and np is None:
@@ -179,9 +180,10 @@ def windows(points, gates, times, tol):
     out = []
     for n, (a, b) in enumerate(spans):
         inside = range(a, min(b, len(times)))
-        # One frame of context each side: VFR writes no frames while the screen
-        # is static, so a spike's return frame can be the gate-off frame.
-        idx = list(range(max(a - 1, 0), min(b + 1, len(times))))
+        # Context frames around the window (1 before, 2 after): VFR writes no
+        # frames while the screen is static, so a spike's return frame can be
+        # the gate-off frame. The harness holds still 10 frames after the gate.
+        idx = list(range(max(a - 1, 0), min(b + 2, len(times))))
         flags = [(k, 'missing', 0.0) for k in inside if points[k] is None]
         d, v = {}, {}
         for i, k in enumerate(idx[1:], 1):
@@ -190,7 +192,9 @@ def windows(points, gates, times, tol):
             if p is None or q is None or dt <= 0:
                 continue
             d[k] = (q[0] - p[0], q[1] - p[1])
-            v[k] = max(abs(c) for c in d[k]) * (1 / 60) / dt
+            # Floor at one display frame: two encoder frames stamped a few ms
+            # apart are timestamp jitter, not motion faster than the display.
+            v[k] = max(abs(c) for c in d[k]) * (1 / 60) / max(dt, 1 / 60)
         mag = {k: max(abs(c) for c in d[k]) for k in d}
         for i, k in enumerate(idx):
             prev = idx[i - 1] if i > 0 else None
@@ -238,6 +242,10 @@ def self_test():
     tail = still[:9] + [(10.0, -134.0)] + still[10:]
     assert any('kind=spike' in x for x in windows(
         tail, [True] * 10 + [False] * 2, t, 1.0)), 'spike at window edge'
+    # Smooth motion with two frames stamped 3ms apart (encoder jitter) passes.
+    jt = t[:6] + [t[5] + 0.003] + [x + 1 / 60 for x in t[6:11]]
+    move = [(10.0, 10.0 + 10 * i) for i in range(12)]
+    assert windows(move, [True] * 12, jt, 1.0)[0].endswith('bad=0'), 'jitter'
     ramp = [(10.0, 10.0 + 0.5 * i * i) for i in range(12)]
     assert windows(ramp, [True] * 12, t, 1.0)[0].endswith('bad=0'), ramp
     print('SELF-TEST ok')
@@ -254,6 +262,8 @@ def parse(argv):
                     help='RGB distance to #FF00FF counted as marker')
     ap.add_argument('--ref-x', type=float, help='reference x in dp')
     ap.add_argument('--ref-y', type=float, help='reference y in dp')
+    ap.add_argument('--down', type=int, default=2,
+                    help='decode at 1/N size (default 2)')
     ap.add_argument('--dump', action='store_true', help='print every frame')
     ap.add_argument('--windows', action='store_true',
                     help='judge each cyan-gate window (needs numpy)')

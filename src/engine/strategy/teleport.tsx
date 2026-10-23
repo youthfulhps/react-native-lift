@@ -1,9 +1,9 @@
 import {
   createContext,
-  useCallback,
   useContext,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -32,17 +32,36 @@ const HOST_NAME = 'react-native-lift';
 
 type Origin = { x: number; y: number };
 
-const HostRectContext = createContext<(() => Origin | undefined) | null>(null);
+type HostContextValue = {
+  getHostRect: () => Origin | undefined;
+  // Translate of the layer holding the PortalHost. An animated drop moves this
+  // layer, not the container, so the container leaves the host with no
+  // transform of its own and the re-parent lands on the same pixels.
+  offsetX: SharedValue<number>;
+  offsetY: SharedValue<number>;
+};
+
+const HostContext = createContext<HostContextValue | null>(null);
 
 export function LiftHost({ children }: { children: ReactNode }) {
   const hostRef = useRef<HostInstance>(null);
-  const getHostRect = useCallback(
-    () => hostRef.current?.getBoundingClientRect(),
-    []
+  const offsetX = useSharedValue(0);
+  const offsetY = useSharedValue(0);
+  const layerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }],
+  }));
+  const value = useMemo(
+    () => ({
+      // The outer view never moves; offsets are added explicitly.
+      getHostRect: () => hostRef.current?.getBoundingClientRect(),
+      offsetX,
+      offsetY,
+    }),
+    [offsetX, offsetY]
   );
   return (
     <PortalProvider>
-      <HostRectContext.Provider value={getHostRect}>
+      <HostContext.Provider value={value}>
         {children}
         <View
           ref={hostRef}
@@ -50,9 +69,15 @@ export function LiftHost({ children }: { children: ReactNode }) {
           pointerEvents="box-none"
           collapsable={false}
         >
-          <PortalHost name={HOST_NAME} style={StyleSheet.absoluteFill} />
+          <Animated.View
+            style={[StyleSheet.absoluteFill, layerStyle]}
+            pointerEvents="box-none"
+            collapsable={false}
+          >
+            <PortalHost name={HOST_NAME} style={StyleSheet.absoluteFill} />
+          </Animated.View>
         </View>
-      </HostRectContext.Provider>
+      </HostContext.Provider>
     </PortalProvider>
   );
 }
@@ -68,6 +93,10 @@ export type LiftSlotProps = {
   ref?: Ref<LiftHandle>;
 };
 
+const near = (a: Origin, b: Origin) =>
+  Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
+const ORIGIN = { x: 0, y: 0 };
+
 export function LiftSlot({
   children,
   style,
@@ -76,37 +105,83 @@ export function LiftSlot({
   onLiftEnd,
   ref,
 }: LiftSlotProps) {
-  const getHostRect = useContext(HostRectContext);
-  if (!getHostRect) {
+  const host = useContext(HostContext);
+  if (!host) {
     throw new Error('react-native-lift: wrap your app in <LiftProvider>');
   }
+  const { getHostRect, offsetX, offsetY } = host;
   const wrapperRef = useRef<HostInstance>(null);
   const size = useRef({ width: 0, height: 0 });
   const [lifted, setLifted] = useState<Lifted | null>(null);
   // Latest requested state, updated synchronously, so same-tick lift()/drop()
   // calls see each other instead of the last render's `lifted` (last call wins).
   const liftedRef = useRef<Lifted | null>(null);
-  // Bumped by every lift()/drop(); an animated drop commits only if still current.
+  // Bumped by every lift()/drop(); a pending drop continues only if current.
   const dropToken = useRef(0);
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
 
   const commit = (next: Lifted | null) => {
     liftedRef.current = next;
     setLifted(next);
   };
-  const finishDrop = (token: number) => {
-    if (token === dropToken.current) {
-      commit(null);
+
+  // Host-layer offset that puts the lifted container over the wrapper, or
+  // undefined when the wrapper is gone (0x0) or off screen.
+  const target = (from: Lifted): Origin | undefined => {
+    const wrapper = wrapperRef.current?.getBoundingClientRect();
+    const hostRect = getHostRect();
+    const win = Dimensions.get('window');
+    if (
+      !wrapper ||
+      !hostRect ||
+      (wrapper.width === 0 && wrapper.height === 0) ||
+      wrapper.x + wrapper.width <= 0 ||
+      wrapper.y + wrapper.height <= 0 ||
+      wrapper.x >= win.width ||
+      wrapper.y >= win.height
+    ) {
+      return undefined;
     }
+    return {
+      x: wrapper.x - hostRect.x - from.left,
+      y: wrapper.y - hostRect.y - from.top,
+    };
+  };
+
+  // R11: the wrapper may have moved while lifted (scroll, bounce, data
+  // change). Commit only when it has stopped (same rect two frames running)
+  // and the host layer sits on it; otherwise wait, or animate there first.
+  const settle = (token: number, from: Lifted, prev?: Origin) => {
+    if (token !== dropToken.current) {
+      return;
+    }
+    const t = target(from);
+    if (!t) {
+      commit(null);
+      return;
+    }
+    const here = { x: offsetX.value, y: offsetY.value };
+    const still = prev !== undefined && near(t, prev);
+    // First sample still at the lift position: nothing moved, commit now.
+    const unmoved = prev === undefined && near(here, ORIGIN);
+    if (near(t, here) && (still || unmoved)) {
+      commit(null);
+      return;
+    }
+    if (!still) {
+      requestAnimationFrame(() => settle(token, from, t));
+      return;
+    }
+    offsetX.value = withTiming(t.x);
+    offsetY.value = withTiming(t.y, undefined, (finished) => {
+      'worklet';
+      if (finished) {
+        scheduleOnRN(settle, token, from, t);
+      }
+    });
   };
 
   const containerStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value },
-      { scale: scale.value },
-    ],
+    transform: [{ scale: scale.value }],
   }));
 
   // Declared before the layout effect below so onLiftStart/onLiftEnd see the
@@ -116,24 +191,24 @@ export function LiftSlot({
     () => ({
       lift() {
         if (liftedRef.current) {
-          // Already lifted, or mid drop-animation: cancel the drop (its
-          // completion no longer matches the token) and settle back in place.
+          // Already lifted, or mid drop: cancel the drop (its token no longer
+          // matches) and bring the layer back to the lift position.
           dropToken.current++;
-          translateX.value = withTiming(0);
-          translateY.value = withTiming(0);
+          offsetX.value = withTiming(0);
+          offsetY.value = withTiming(0);
           return;
         }
         const wrapper = wrapperRef.current?.getBoundingClientRect();
-        const host = getHostRect();
+        const hostRect = getHostRect();
         // No onLayout yet would lock the wrapper to 0x0.
-        if (!wrapper || !host || size.current.width === 0) {
+        if (!wrapper || !hostRect || size.current.width === 0) {
           return;
         }
         // B1: one commit flips hostName, sets the host-local rect, and locks
         // the wrapper to its untransformed onLayout size.
         commit({
-          left: wrapper.x - host.x,
-          top: wrapper.y - host.y,
+          left: wrapper.x - hostRect.x,
+          top: wrapper.y - hostRect.y,
           ...size.current,
         });
       },
@@ -143,41 +218,16 @@ export function LiftSlot({
           return;
         }
         const token = ++dropToken.current;
-        // R11: re-measure; the target may have moved while lifted.
-        const wrapper = wrapperRef.current?.getBoundingClientRect();
-        const host = getHostRect();
-        const win = Dimensions.get('window');
-        const unusable =
-          !wrapper ||
-          !host ||
-          (wrapper.width === 0 && wrapper.height === 0) ||
-          wrapper.x + wrapper.width <= 0 ||
-          wrapper.y + wrapper.height <= 0 ||
-          wrapper.x >= win.width ||
-          wrapper.y >= win.height;
-        if (immediate || unusable) {
+        if (immediate) {
           commit(null);
           return;
         }
-        const dx = wrapper.x - host.x - from.left;
-        const dy = wrapper.y - host.y - from.top;
-        // Sub-pixel noise must not take the animated (commit-race) path.
-        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
-          commit(null);
-          return;
-        }
-        translateX.value = withTiming(dx);
-        translateY.value = withTiming(dy, undefined, (finished) => {
-          'worklet';
-          if (finished) {
-            scheduleOnRN(finishDrop, token);
-          }
-        });
+        settle(token, from);
       },
     }),
-    // commit/finishDrop only touch refs and the stable setLifted.
+    // commit/settle only touch refs, shared values and the stable setLifted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getHostRect, translateX, translateY]
+    [getHostRect, offsetX, offsetY]
   );
 
   const isLifted = lifted !== null;
@@ -191,13 +241,15 @@ export function LiftSlot({
       onLiftStart?.();
       return;
     }
-    // ponytail: this JS-side translate reset races the native re-parent commit
-    // (Portal back into the wrapper); that ordering is exactly what P2 measures.
-    // Upgrade path is B2 if the probe/pixel check shows a frame of offset.
-    translateX.value = 0;
-    translateY.value = 0;
+    // Runs after the re-parent commit, so the mount (queued first) has taken
+    // the container out of the host before this reset lands; the host is
+    // empty by then and nothing visible moves.
+    // ponytail: one layer for all slots; a second slot lifting during another
+    // slot's drop animation would ride it. Step 2.2 (one lift at a time) closes it.
+    offsetX.value = 0;
+    offsetY.value = 0;
     onLiftEnd?.();
-  }, [isLifted, onLiftStart, onLiftEnd, translateX, translateY]);
+  }, [isLifted, onLiftStart, onLiftEnd, offsetX, offsetY]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     size.current = {
