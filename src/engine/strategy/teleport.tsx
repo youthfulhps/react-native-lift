@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -71,6 +72,18 @@ export function LiftHost({ children }: { children: ReactNode }) {
   // Rendered copy of the machine: owner (backdrop, scroll lock) and phase.
   const [shown, setShown] = useState<LiftState<SlotHandle>>(IDLE);
   const active = shown.phase === 'idle' ? null : shown.slot;
+  // The last owner's backdrop stays mounted (hidden, untouchable) for its
+  // fade-out after the host goes idle: an unmoved drop goes idle in the
+  // same batch, which would otherwise cut the backdrop in one frame.
+  const [fading, setFading] = useState<SlotHandle | null>(null);
+  useEffect(() => {
+    if (!fading) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setFading(null), fading.backdropFade());
+    return () => clearTimeout(timer);
+  }, [fading]);
+  const backdrop = active ?? fading;
   const state = useRef<LiftState<SlotHandle>>(IDLE);
   const layerStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }],
@@ -82,9 +95,15 @@ export function LiftHost({ children }: { children: ReactNode }) {
       offsetX,
       offsetY,
       send: (event: LiftEvent<SlotHandle>) => {
-        state.current = transition(state.current, event);
+        const prev = state.current;
+        state.current = transition(prev, event);
         // Backdrop and scroll lock follow the owner, measuring included.
         setShown(state.current);
+        if (state.current.phase !== 'idle') {
+          setFading(null);
+        } else if (prev.phase !== 'idle') {
+          setFading(prev.slot);
+        }
         return state.current;
       },
       phase: () => state.current.phase,
@@ -103,18 +122,25 @@ export function LiftHost({ children }: { children: ReactNode }) {
           pointerEvents="box-none"
           collapsable={false}
         >
-          {/* AC-E2: a tap outside the lifted view drops it. The owner's
-              backdrop shows from the lift request on, so it covers the
-              keyboard wait before the teleport. */}
+          {/* The owner's backdrop shows from the lift request on, so it
+              covers the keyboard wait before the teleport. Same position in
+              the tree while it fades out, so it is not remounted. */}
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {backdrop && (
+              <Backdrop
+                render={backdrop.renderBackdrop}
+                visible={!!active && shown.phase !== 'dropping'}
+              />
+            )}
+          </View>
+          {/* AC-E2: a tap outside the lifted view drops it. */}
           {active && (
             <Pressable
               testID="lift-backdrop"
               accessibilityLabel="lift-backdrop"
               style={StyleSheet.absoluteFill}
               onPress={() => active.drop()}
-            >
-              {active.renderBackdrop({ visible: shown.phase !== 'dropping' })}
-            </Pressable>
+            />
           )}
           <Animated.View
             style={[StyleSheet.absoluteFill, layerStyle]}
@@ -127,6 +153,17 @@ export function LiftHost({ children }: { children: ReactNode }) {
       </HostContext.Provider>
     </PortalProvider>
   );
+}
+
+// A component, so hooks inside a renderBackdrop belong to it, not LiftHost.
+function Backdrop({
+  render,
+  visible,
+}: {
+  render: SlotHandle['renderBackdrop'];
+  visible: boolean;
+}) {
+  return render({ visible });
 }
 
 type Lifted = {
@@ -159,14 +196,19 @@ export type LiftSlotProps = {
   // the host.
   dropTiming?: WithTimingConfig;
   renderBackdrop?: (state: { visible: boolean }) => ReactNode;
+  // How long the backdrop stays mounted after the drop to fade out (ms).
+  backdropFade?: number;
   ref?: Ref<SlotHandle>;
 };
 
 // Internal: lift() also says whether it was accepted, so the gesture can
 // undo its press scale when it was not.
 export type SlotHandle = {
-  lift(): boolean;
+  // 'new': accepted from idle; 'repeat': this slot already owned the host
+  // (a repeat, or a lift mid-drop); false: rejected.
+  lift(): 'new' | 'repeat' | false;
   renderBackdrop(state: { visible: boolean }): ReactNode;
+  backdropFade(): number;
   // restoreFocus: false skips AC-E6's restore for this drop (a menu item
   // that navigates).
   drop(opts?: { immediate?: boolean; restoreFocus?: boolean }): void;
@@ -187,6 +229,7 @@ export function LiftSlot({
   onLiftCancel,
   dropTiming,
   renderBackdrop,
+  backdropFade,
   ref,
 }: LiftSlotProps) {
   const host = useContext(HostContext);
@@ -224,6 +267,7 @@ export function LiftSlot({
     itemKey,
     dropTiming,
     renderBackdrop,
+    backdropFade,
   });
   latest.current = {
     restoreFocus,
@@ -231,6 +275,7 @@ export function LiftSlot({
     itemKey,
     dropTiming,
     renderBackdrop,
+    backdropFade,
   };
   // Stable identity: the machine and the backdrop compare handles.
   const api = useRef<SlotHandle | null>(null);
@@ -367,6 +412,7 @@ export function LiftSlot({
   // context functions, so first-render closures stay correct.
   api.current ??= {
     renderBackdrop: (state) => latest.current.renderBackdrop?.(state) ?? null,
+    backdropFade: () => latest.current.backdropFade ?? 0,
     lift() {
       if (!owns(send({ type: 'lift', slot: me() }), me())) {
         return false;
@@ -377,19 +423,19 @@ export function LiftSlot({
         dropToken.current++;
         offsetX.value = withTiming(0, latest.current.dropTiming);
         offsetY.value = withTiming(0, latest.current.dropTiming);
-        return true;
+        return 'repeat';
       }
       liftKey.current = latest.current.itemKey;
       dropFocus.current = true;
       if (pendingLift.current) {
         pendingToken.current = ++dropToken.current;
-        return true;
+        return 'repeat';
       }
       const token = ++dropToken.current;
       if (!Keyboard.isVisible()) {
         focused.current = null;
         start(token);
-        return liftedRef.current !== null;
+        return liftedRef.current ? 'new' : false;
       }
       // Measure once the keyboard is gone and layout has settled: from the
       // end of the hide animation, the wrapper at the same rect for 3 frames
@@ -447,7 +493,7 @@ export function LiftSlot({
       const timer = setTimeout(go, 1000);
       keyboardWait.current = stop;
       Keyboard.dismiss();
-      return true;
+      return 'new';
     },
     drop({ immediate = false, restoreFocus: focus = true } = {}) {
       const from = liftedRef.current;

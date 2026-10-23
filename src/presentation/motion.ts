@@ -26,15 +26,22 @@ export type MotionOverride = {
   backdrop?: Partial<Motion['backdrop']>;
 };
 
+// Override keys left undefined keep the default (withTiming would take an
+// explicit `easing: undefined` as the easing).
+const over = <T extends object>(base: T, o: Partial<T> = {}): T => ({
+  ...base,
+  ...Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)),
+});
+
 // `motion` prop: override any value, keep the rest.
 export function mergeMotion(override?: MotionOverride): Motion {
   if (!override) {
     return defaultMotion;
   }
   return {
-    press: { ...defaultMotion.press, ...override.press },
+    press: over(defaultMotion.press, override.press),
     release: override.release ?? defaultMotion.release,
-    drop: { ...defaultMotion.drop, ...override.drop },
-    backdrop: { ...defaultMotion.backdrop, ...override.backdrop },
+    drop: over(defaultMotion.drop, override.drop),
+    backdrop: over(defaultMotion.backdrop, override.backdrop),
   };
 }

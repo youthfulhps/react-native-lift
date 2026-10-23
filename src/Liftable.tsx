@@ -17,7 +17,12 @@ import type { LiftHandle } from './types';
 
 export type LiftableProps = Omit<
   LiftSlotProps,
-  'scale' | 'ref' | 'onLiftCancel' | 'dropTiming' | 'renderBackdrop'
+  | 'scale'
+  | 'ref'
+  | 'onLiftCancel'
+  | 'dropTiming'
+  | 'renderBackdrop'
+  | 'backdropFade'
 > & {
   ref?: Ref<LiftHandle>;
   // The press scale (0.95 while pressed). Pass your own to animate it after
@@ -27,7 +32,8 @@ export type LiftableProps = Omit<
   longPress?: boolean;
   // Override any motion value (AC-M1); the rest keep their defaults.
   motion?: MotionOverride;
-  // Replaces the default dim (AC-M3), e.g. with a blur.
+  // Replaces the default dim (AC-M3), e.g. with a blur. Animate on
+  // `visible`: it stays mounted for motion.backdrop.duration after a drop.
   renderBackdrop?: (state: BackdropState) => ReactNode;
   // Called once when a long press lifts the view (AC-M4), e.g. a haptic.
   haptics?: () => void;
@@ -61,9 +67,10 @@ export function Liftable({
       // Accepted: feedback now, with the backdrop, even if the teleport
       // waits for the keyboard. Rejected (another view is lifted, no layout
       // yet): undo the press.
-      if (slot.current?.lift()) {
+      const lifted = slot.current?.lift();
+      if (lifted === 'new') {
         haptics?.();
-      } else {
+      } else if (!lifted) {
         pressScale.value = withSpring(1, motion.release);
       }
     },
@@ -76,6 +83,7 @@ export function Liftable({
         ref={slot}
         scale={pressScale}
         dropTiming={motion.drop}
+        backdropFade={motion.backdrop.duration}
         renderBackdrop={
           renderBackdrop ??
           ((state) => <DimBackdrop {...state} motion={motion.backdrop} />)
