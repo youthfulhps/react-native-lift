@@ -188,7 +188,16 @@ def windows(points, gates, times, tol):
         lo, hi = times[a] - 0.05, times[inside[-1]] + 0.05
         idx = [k for k in range(max(a - 2, 0), min(b + 2, len(times)))
                if k in inside or lo <= times[k] <= hi]
-        flags = [(k, 'missing', 0.0) for k in inside if points[k] is None]
+        # Missing frames that continue a run already missing before the
+        # window are occlusion (e.g. the keyboard still sliding away), not a
+        # loss the transition caused: the gate opens before the commit.
+        lead = a > 0 and points[a - 1] is None
+        flags = []
+        for k in inside:
+            if points[k] is not None:
+                lead = False
+            elif not lead:
+                flags.append((k, 'missing', 0.0))
         # Distinct positions only: a repeated frame is a dropped render frame
         # (or VFR idle), so steps are compared change to change.
         seq = []
@@ -264,6 +273,12 @@ def self_test():
     move = [(10.0, 10.0 + 10 * i) for i in range(12)]
     drop = move[:6] + [move[5]] + move[7:]
     assert windows(drop, [True] * 12, t, 1.0)[0].endswith('bad=0'), 'drop'
+    # Marker hidden before the window and into it: occlusion, not a loss.
+    hidden = [None] * 6 + still[6:]
+    assert windows(hidden, [False] * 4 + [True] * 8, t, 1.0)[0].endswith(
+        'bad=0'), 'occlusion'
+    gone = still[:7] + [None] + still[8:]
+    assert 'kind=missing' in windows(gone, [True] * 12, t, 1.0)[1], 'loss'
     # Mid-motion skipped frame (one 2-frame step) passes.
     skip = move[:6] + move[7:] + [move[-1]]
     st = t[:6] + [x + 1 / 60 for x in t[6:]]
