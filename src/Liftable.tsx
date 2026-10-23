@@ -34,6 +34,9 @@ export type LiftableProps = Omit<
   motion?: MotionOverride;
   // Replaces the default dim (AC-M3), e.g. with a blur. Animate on
   // `visible`: it stays mounted for motion.backdrop.duration after a drop.
+  // Return an element and keep hooks inside its component (the host may
+  // reuse one instance across owners). It receives no touches: a tap
+  // anywhere outside the lifted view drops it.
   renderBackdrop?: (state: BackdropState) => ReactNode;
   // Called once when a long press lifts the view (AC-M4), e.g. a haptic.
   haptics?: () => void;

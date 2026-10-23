@@ -16,7 +16,11 @@ jest.mock('react-native-reanimated', () => {
     (kind: string) =>
     (to: number, config?: unknown, done?: (finished: boolean) => void) => {
       mockAnimations.push({ kind, to, config });
-      done?.(true);
+      // Like the real one: the finish callback comes later, not inside the
+      // call (the caller assigns the value first).
+      if (done) {
+        setTimeout(() => done(true), 0);
+      }
       return to;
     };
   return {
@@ -121,6 +125,14 @@ test('haptics is called once when the long press lifts the view', async () => {
   await longPress();
   expect(haptics).toHaveBeenCalledTimes(1);
   expect(screen.getByTestId('lift-backdrop')).toBeTruthy();
+});
+
+test('a repeat activation on the lifted view calls no haptics', async () => {
+  const haptics = jest.fn();
+  await render(app({ haptics }));
+  await longPress();
+  await act(() => mockGestures[0]!.onLift());
+  expect(haptics).toHaveBeenCalledTimes(1);
 });
 
 test('no haptics adapter: lifting does not throw', async () => {
@@ -232,4 +244,69 @@ test('keyboard open: feedback first, teleport after the hide', async () => {
   expect(haptics).toHaveBeenCalledTimes(1);
   expect(screen.getByText('visible:true')).toBeTruthy();
   expect(mounts).toBe(1);
+});
+
+test('the default dim fades to 0 over its duration on a drop', async () => {
+  const ref = { current: null as LiftHandle | null };
+  await render(app({ ref, motion: { backdrop: { duration: 180 } } }));
+  await longPress();
+  mockAnimations.length = 0;
+  await act(() => ref.current!.drop());
+  expect(screen.getByTestId('lift-dim')).toBeTruthy();
+  expect(mockAnimations).toContainEqual({
+    kind: 'timing',
+    to: 0,
+    config: { duration: 180 },
+  });
+});
+
+test('another lift during the fade keeps the backdrop past the old deadline', async () => {
+  jest.useFakeTimers();
+  const a = { current: null as LiftHandle | null };
+  const fade = { backdrop: { duration: 250 } };
+  const backdrop = (s: { visible: boolean }) => <Probe {...s} />;
+  await render(
+    <LiftProvider>
+      <Row ref={a} motion={fade} renderBackdrop={backdrop} />
+      <Row motion={fade} renderBackdrop={backdrop} />
+    </LiftProvider>
+  );
+  await longPress(0);
+  await act(() => a.current!.drop());
+  expect(screen.getByText('visible:false')).toBeTruthy();
+  await act(() => jest.advanceTimersByTime(100));
+  await longPress(1);
+  expect(screen.getByText('visible:true')).toBeTruthy();
+  // A's fade timer (250ms) must not take B's backdrop with it.
+  await act(() => jest.advanceTimersByTime(500));
+  expect(screen.getByText('visible:true')).toBeTruthy();
+  expect(mounts).toBe(1);
+});
+
+test('a slot unmounted during its fade: the backdrop still fades, then goes', async () => {
+  jest.useFakeTimers();
+  const ref = { current: null as LiftHandle | null };
+  const props = {
+    ref,
+    motion: { backdrop: { duration: 250 } },
+    renderBackdrop: (s: { visible: boolean }) => <Probe {...s} />,
+  };
+  const tree = (show: boolean) => (
+    <LiftProvider>{show ? <Row {...props} /> : null}</LiftProvider>
+  );
+  await render(tree(true));
+  await longPress();
+  await act(() => ref.current!.drop());
+  await screen.rerender(tree(false));
+  expect(screen.getByText('visible:false')).toBeTruthy();
+  await act(() => jest.advanceTimersByTime(250));
+  expect(screen.queryByTestId('custom-backdrop')).toBeNull();
+});
+
+test('a lift that fails at once (no layout yet) leaves no backdrop', async () => {
+  await render(app({ renderBackdrop: (s) => <Probe {...s} /> }));
+  // No layout event: the slot rejects the lift in the same batch.
+  await act(() => mockGestures[0]!.onLift());
+  expect(screen.queryByTestId('custom-backdrop')).toBeNull();
+  expect(screen.queryByTestId('lift-backdrop')).toBeNull();
 });

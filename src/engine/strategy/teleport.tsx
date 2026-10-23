@@ -84,6 +84,12 @@ export function LiftHost({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [fading]);
   const backdrop = active ?? fading;
+  // Owner whose backdrop has been rendered: a lift that failed in the same
+  // batch it started in never showed one, so it leaves nothing to fade.
+  const rendered = useRef<SlotHandle | null>(null);
+  useLayoutEffect(() => {
+    rendered.current = active;
+  }, [active]);
   const state = useRef<LiftState<SlotHandle>>(IDLE);
   const layerStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }],
@@ -101,7 +107,7 @@ export function LiftHost({ children }: { children: ReactNode }) {
         setShown(state.current);
         if (state.current.phase !== 'idle') {
           setFading(null);
-        } else if (prev.phase !== 'idle') {
+        } else if (prev.phase !== 'idle' && rendered.current === prev.slot) {
           setFading(prev.slot);
         }
         return state.current;
