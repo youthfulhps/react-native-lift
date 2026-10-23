@@ -37,6 +37,7 @@ import {
   lock,
   mounts,
   runAutoLoop,
+  noBackdrop,
   runMovedDrop,
   type CellEntry,
 } from './autoLoop';
@@ -118,6 +119,7 @@ const Cell = memo(function CellView({
         scale={scale}
         style={liftableStyle[kind]}
         itemKey={index}
+        renderBackdrop={noBackdrop}
         onLiftStart={() => {
           entry.liftedIndex = index;
           if (entry.ctx) {

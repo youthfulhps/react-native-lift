@@ -25,10 +25,10 @@ import Animated, {
   useSharedValue,
   withTiming,
   type SharedValue,
+  type WithTimingConfig,
 } from 'react-native-reanimated';
 import { Portal, PortalHost, PortalProvider } from 'react-native-teleport';
 import { scheduleOnRN } from 'react-native-worklets';
-import type { LiftHandle } from '../../types';
 import { focusToRestore } from '../focus';
 import {
   IDLE,
@@ -52,15 +52,15 @@ type HostContextValue = {
   offsetX: SharedValue<number>;
   offsetY: SharedValue<number>;
   // Runs the one-lift-at-a-time machine (liftState.ts); returns the new state.
-  send: (event: LiftEvent<LiftHandle>) => LiftState<LiftHandle>;
-  phase: () => LiftState<LiftHandle>['phase'];
+  send: (event: LiftEvent<SlotHandle>) => LiftState<SlotHandle>;
+  phase: () => LiftState<SlotHandle>['phase'];
 };
 
 const HostContext = createContext<HostContextValue | null>(null);
 
 // The lifted slot's handle, or null. Separate from HostContext so only
 // consumers of it (scroll lock, backdrop) re-render on lift/drop.
-export const LiftContext = createContext<{ active: LiftHandle | null } | null>(
+export const LiftContext = createContext<{ active: SlotHandle | null } | null>(
   null
 );
 
@@ -68,8 +68,10 @@ export function LiftHost({ children }: { children: ReactNode }) {
   const hostRef = useRef<HostInstance>(null);
   const offsetX = useSharedValue(0);
   const offsetY = useSharedValue(0);
-  const [active, setActive] = useState<LiftHandle | null>(null);
-  const state = useRef<LiftState<LiftHandle>>(IDLE);
+  // Rendered copy of the machine: owner (backdrop, scroll lock) and phase.
+  const [shown, setShown] = useState<LiftState<SlotHandle>>(IDLE);
+  const active = shown.phase === 'idle' ? null : shown.slot;
+  const state = useRef<LiftState<SlotHandle>>(IDLE);
   const layerStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }],
   }));
@@ -79,10 +81,10 @@ export function LiftHost({ children }: { children: ReactNode }) {
       getHostRect: () => windowRect(hostRef.current),
       offsetX,
       offsetY,
-      send: (event: LiftEvent<LiftHandle>) => {
+      send: (event: LiftEvent<SlotHandle>) => {
         state.current = transition(state.current, event);
         // Backdrop and scroll lock follow the owner, measuring included.
-        setActive(state.current.phase === 'idle' ? null : state.current.slot);
+        setShown(state.current);
         return state.current;
       },
       phase: () => state.current.phase,
@@ -101,14 +103,18 @@ export function LiftHost({ children }: { children: ReactNode }) {
           pointerEvents="box-none"
           collapsable={false}
         >
-          {/* AC-E2: a tap outside the lifted view drops it. */}
+          {/* AC-E2: a tap outside the lifted view drops it. The owner's
+              backdrop shows from the lift request on, so it covers the
+              keyboard wait before the teleport. */}
           {active && (
             <Pressable
               testID="lift-backdrop"
               accessibilityLabel="lift-backdrop"
               style={StyleSheet.absoluteFill}
               onPress={() => active.drop()}
-            />
+            >
+              {active.renderBackdrop({ visible: shown.phase !== 'dropping' })}
+            </Pressable>
           )}
           <Animated.View
             style={[StyleSheet.absoluteFill, layerStyle]}
@@ -148,6 +154,11 @@ export type LiftSlotProps = {
   // Internal: an accepted lift that never committed (cancelled or failed
   // during the keyboard wait).
   onLiftCancel?: () => void;
+  // Presentation, passed in as plain data and a render function (AC-E8):
+  // the drop animation's timing, and the backdrop while this slot owns
+  // the host.
+  dropTiming?: WithTimingConfig;
+  renderBackdrop?: (state: { visible: boolean }) => ReactNode;
   ref?: Ref<SlotHandle>;
 };
 
@@ -155,6 +166,7 @@ export type LiftSlotProps = {
 // undo its press scale when it was not.
 export type SlotHandle = {
   lift(): boolean;
+  renderBackdrop(state: { visible: boolean }): ReactNode;
   // restoreFocus: false skips AC-E6's restore for this drop (a menu item
   // that navigates).
   drop(opts?: { immediate?: boolean; restoreFocus?: boolean }): void;
@@ -173,6 +185,8 @@ export function LiftSlot({
   restoreFocus = true,
   itemKey,
   onLiftCancel,
+  dropTiming,
+  renderBackdrop,
   ref,
 }: LiftSlotProps) {
   const host = useContext(HostContext);
@@ -204,8 +218,20 @@ export function LiftSlot({
   const dropFocus = useRef(true);
   const mounted = useRef(true);
   // Read through refs: the once-created api closure calls restore/start.
-  const latest = useRef({ restoreFocus, onLiftCancel, itemKey });
-  latest.current = { restoreFocus, onLiftCancel, itemKey };
+  const latest = useRef({
+    restoreFocus,
+    onLiftCancel,
+    itemKey,
+    dropTiming,
+    renderBackdrop,
+  });
+  latest.current = {
+    restoreFocus,
+    onLiftCancel,
+    itemKey,
+    dropTiming,
+    renderBackdrop,
+  };
   // Stable identity: the machine and the backdrop compare handles.
   const api = useRef<SlotHandle | null>(null);
   const me = () => api.current!;
@@ -287,8 +313,8 @@ export function LiftSlot({
       requestAnimationFrame(() => settle(token, from, t));
       return;
     }
-    offsetX.value = withTiming(t.x);
-    offsetY.value = withTiming(t.y, undefined, (finished) => {
+    offsetX.value = withTiming(t.x, latest.current.dropTiming);
+    offsetY.value = withTiming(t.y, latest.current.dropTiming, (finished) => {
       'worklet';
       if (finished) {
         scheduleOnRN(settle, token, from, t);
@@ -340,6 +366,7 @@ export function LiftSlot({
   // Created once; everything it calls reads refs, shared values or stable
   // context functions, so first-render closures stay correct.
   api.current ??= {
+    renderBackdrop: (state) => latest.current.renderBackdrop?.(state) ?? null,
     lift() {
       if (!owns(send({ type: 'lift', slot: me() }), me())) {
         return false;
@@ -348,8 +375,8 @@ export function LiftSlot({
         // Already lifted, or mid drop: cancel the drop (its token no longer
         // matches) and bring the layer back to the lift position.
         dropToken.current++;
-        offsetX.value = withTiming(0);
-        offsetY.value = withTiming(0);
+        offsetX.value = withTiming(0, latest.current.dropTiming);
+        offsetY.value = withTiming(0, latest.current.dropTiming);
         return true;
       }
       liftKey.current = latest.current.itemKey;

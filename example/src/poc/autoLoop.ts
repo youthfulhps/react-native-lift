@@ -42,6 +42,11 @@ export type ListRef = RefObject<{
 
 export type MovedMode = 'momentum' | 'settled' | 'update' | 'rebind';
 
+// Pixel-judged screens render no backdrop: a dim would darken the cyan gate
+// and (during the keyboard wait) the marker, a different scene from the one
+// the frozen P2 rules were set on.
+export const noBackdrop = () => null;
+
 // Mirrors useLiftScrollLock() on the screen: true once no view is lifted.
 export const lock = { scrollEnabled: true };
 

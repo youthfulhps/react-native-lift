@@ -4,20 +4,26 @@ import {
   withSpring,
   withTiming,
   type SharedValue,
+  type WithSpringConfig,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
-// Long press: press-in shrinks to 0.95, activation lifts, a press that never
+// Long press: press-in shrinks (press.scale), activation lifts, a press that never
 // activates (scroll took over, finger moved > maxDistance) springs back.
 // Scale after a lift is the caller's (presentation's) business.
 export function useLiftGesture({
   scale,
   onLift,
   enabled = true,
+  press,
+  release,
 }: {
   scale: SharedValue<number>;
   onLift: () => void;
   enabled?: boolean;
+  // Motion values, as plain data from the presentation layer.
+  press: { scale: number; duration: number };
+  release: WithSpringConfig;
 }) {
   const activated = useSharedValue(false);
   return useLongPressGesture({
@@ -27,7 +33,7 @@ export function useLiftGesture({
     onBegin: () => {
       'worklet';
       activated.value = false;
-      scale.value = withTiming(0.95, { duration: 150 });
+      scale.value = withTiming(press.scale, { duration: press.duration });
     },
     onActivate: () => {
       'worklet';
@@ -37,7 +43,7 @@ export function useLiftGesture({
     onFinalize: () => {
       'worklet';
       if (!activated.value) {
-        scale.value = withSpring(1);
+        scale.value = withSpring(1, release);
       }
     },
   });

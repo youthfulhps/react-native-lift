@@ -19,7 +19,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Liftable, useLiftRef, useLiftScrollLock } from 'react-native-lift';
 import { scheduleOnRN } from 'react-native-worklets';
-import { frames, gate } from './autoLoop';
+import { frames, gate, noBackdrop } from './autoLoop';
 import { useProbe, type ProbeCtx } from './probe';
 
 // P6: lift a message while the keyboard is open (the engine dismisses it and
@@ -173,6 +173,7 @@ const Message = memo(function MessageView({
       ref={handle}
       scale={scale}
       restoreFocus={restore}
+      renderBackdrop={noBackdrop}
       onLiftStart={async () => {
         status.lifted = true;
         status.set({ lifted: true, lifts: ++status.lifts });
