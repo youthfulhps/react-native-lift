@@ -88,14 +88,14 @@ const layout = {
   nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 60 } },
 };
 
+// content -> inner -> clip -> container -> wrapper (the Portal mock adds no
+// node).
+const wrapperOf = (n = 0) =>
+  screen.getAllByTestId('content')[n]!.parent!.parent!.parent!.parent!;
+
 // The long press activates on laid-out view `n`.
 async function longPress(n = 0) {
-  // content -> container -> wrapper (the Portal mock adds no node).
-  await fireEvent(
-    screen.getAllByTestId('content')[n]!.parent!.parent!,
-    'layout',
-    layout
-  );
+  await fireEvent(wrapperOf(n), 'layout', layout);
   await act(() => mockGestures[n]!.onLift());
 }
 
@@ -349,11 +349,7 @@ test('lift() and drop() in one batch: nothing renders, nothing waits', async () 
   await render(
     app({ ref, onLiftStart, renderBackdrop: (s) => <Probe {...s} /> })
   );
-  await fireEvent(
-    screen.getByTestId('content').parent!.parent!,
-    'layout',
-    layout
-  );
+  await fireEvent(wrapperOf(), 'layout', layout);
   await act(() => {
     ref.current!.lift();
     ref.current!.drop();
@@ -607,18 +603,12 @@ test('U4: disabled: no long press, ref.lift() does nothing', async () => {
   expect((mockGestures[0] as unknown as { enabled: boolean }).enabled).toBe(
     false
   );
-  await fireEvent(
-    screen.getByTestId('content').parent!.parent!,
-    'layout',
-    layout
-  );
+  await fireEvent(wrapperOf(), 'layout', layout);
   await act(() => ref.current!.lift());
   expect(onLiftStart).not.toHaveBeenCalled();
   expect(screen.queryByTestId('lift-backdrop')).toBeNull();
   // No lift alternative either.
-  expect(
-    screen.getByTestId('content').parent!.parent!.props.accessibilityActions
-  ).toBeUndefined();
+  expect(wrapperOf().props.accessibilityActions).toBeUndefined();
 });
 
 test('E2: a menu item runs, then drops, then onLiftEnd', async () => {
@@ -672,7 +662,7 @@ test('E7: menu titles as accessibility actions, run without a lift or haptics', 
   const onLiftStart = jest.fn();
   const haptics = jest.fn();
   await render(app({ menu: menuItems(log), onLiftStart, haptics }));
-  const wrapper = screen.getByTestId('content').parent!.parent!;
+  const wrapper = wrapperOf();
   expect(
     wrapper.props.accessibilityActions.map((a: { name: string }) => a.name)
   ).toEqual(['Copy', 'Delete']);
@@ -687,10 +677,11 @@ test('E7: menu titles as accessibility actions, run without a lift or haptics', 
 
 test('a view too tall for the menu shrinks and is clipped, and grows back before it drops', async () => {
   jest.useFakeTimers();
-  // 60dp view, 88dp menu, 100dp screen: it scales to the 0.5 floor.
+  // 60dp view, menu and gap 96dp, 119dp screen less a 7dp inset: 16dp of
+  // room, so it scales to the 0.5 floor (30dp) and 14dp still overflow.
   jest
     .spyOn(Dimensions, 'get')
-    .mockReturnValue({ width: 300, height: 100 } as never);
+    .mockReturnValue({ width: 300, height: 119 } as never);
   const ref = { current: null as LiftHandle | null };
   const onLiftEnd = jest.fn();
   await render(
@@ -698,23 +689,45 @@ test('a view too tall for the menu shrinks and is clipped, and grows back before
       <Row ref={ref} menu={menuItems()} onLiftEnd={onLiftEnd} />
     </LiftProvider>
   );
+  // content -> inner -> clip -> container.
+  const clip = () => screen.getByTestId('content').parent!.parent!;
+  const inner = () => screen.getByTestId('content').parent!;
+  expect(StyleSheet.flatten(clip().props.style).overflow).toBeUndefined();
   await longPress();
   await placeChrome();
   expect(mockAnimations.some((a) => a.to === 0.5)).toBe(true);
   // Rule 4: still too tall at 0.5, so the side opposite the menu (above
-  // it) is cut: the clip window's bottom edge moves to the visible bottom.
+  // it) is cut where it leaves the safe area.
   const r = jest.mocked(computeLayout).mock.results.at(-1)!.value as ReturnType<
     typeof computeLayout
   >;
-  expect(r.clip?.side).toBe('bottom');
+  expect(r.clip).toEqual({ side: 'bottom', amount: 14 });
   const visibleBottom = r.viewRect.y + r.viewRect.height - r.clip!.amount;
-  expect(visibleBottom).toBe(93);
-  expect(mockAnimations.some((a) => a.to === -7)).toBe(true);
+  expect(visibleBottom).toBe(112);
+  // In the view's own units (14 / 0.5 = 28 cut): the visible part, and the
+  // view at full size under it. Scaled by the container, its edge lands on
+  // the visible bottom.
+  const cut = StyleSheet.flatten(clip().props.style);
+  expect(cut).toEqual({ overflow: 'hidden', marginTop: 0, height: 32 });
+  expect(StyleSheet.flatten(inner().props.style)).toEqual({
+    marginTop: -0,
+    height: 60,
+  });
+  expect(r.viewRect.y + cut.height * r.scale).toBe(visibleBottom);
+  // The edge moves with the view: a plain child of the scaled container,
+  // nothing animates it, and it stays put in view units over the move.
+  const container = clip().parent!;
+  expect(StyleSheet.flatten(container.props.style).transform).toEqual([
+    { scale: 0.5 },
+  ]);
+  expect(mockAnimations.map((a) => a.to)).not.toContain(32);
+  await act(() => jest.advanceTimersByTime(300 + 16));
+  expect(StyleSheet.flatten(clip().props.style)).toEqual(cut);
   mockAnimations.length = 0;
   await act(() => ref.current!.drop());
   expect(mockAnimations.some((a) => a.to === 1)).toBe(true);
-  // The window opens back to the whole host over the same move.
-  expect(mockAnimations.filter((a) => a.to === 0)).not.toHaveLength(0);
+  // The cut part is outside the safe area: shown again as the view grows back.
+  expect(StyleSheet.flatten(clip().props.style).overflow).toBeUndefined();
   // The scale back (300ms) outlasts the fade (200ms).
   await act(() => jest.advanceTimersByTime(250));
   expect(onLiftEnd).not.toHaveBeenCalled();
@@ -774,7 +787,7 @@ test('menu items that change while lifted show up', async () => {
 });
 
 test('accessible: a menu makes the view one element, unless overridden', async () => {
-  const wrapper = () => screen.getByTestId('content').parent!.parent!;
+  const wrapper = () => wrapperOf();
   const view = await render(app({ menu: menuItems() }));
   expect(wrapper().props.accessible).toBe(true);
   await view.rerender(app({ menu: menuItems(), accessible: false }));

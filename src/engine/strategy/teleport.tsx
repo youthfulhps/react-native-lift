@@ -60,9 +60,6 @@ type HostContextValue = {
   // transform of its own and the re-parent lands on the same pixels.
   offsetX: SharedValue<number>;
   offsetY: SharedValue<number>;
-  // Layout rule 4: vertical shift of the clip window around that layer (0:
-  // the whole host, no clip). The window moves by it, the layer back by it.
-  clipShift: SharedValue<number>;
   // Runs the one-lift-at-a-time machine (liftState.ts); returns the new state.
   send: (event: LiftEvent<SlotHandle>) => LiftState<SlotHandle>;
   phase: () => LiftState<SlotHandle>['phase'];
@@ -93,21 +90,13 @@ export function LiftHost({
   const hostSize = useRef<Size | null>(null);
   const offsetX = useSharedValue(0);
   const offsetY = useSharedValue(0);
-  const clipShift = useSharedValue(0);
   // Rendered copy of the machine: owner (backdrop, scroll lock) and phase.
   const [shown, setShown] = useState<LiftState<SlotHandle>>(IDLE);
   const [, setTick] = useState(0);
   const active = shown.phase === 'idle' ? null : shown.slot;
   const state = useRef<LiftState<SlotHandle>>(IDLE);
-  const clipStyle = useAnimatedStyle(() => ({
-    overflow: clipShift.value === 0 ? 'visible' : 'hidden',
-    transform: [{ translateY: clipShift.value }],
-  }));
   const layerStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: offsetX.value },
-      { translateY: offsetY.value - clipShift.value },
-    ],
+    transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }],
   }));
   const value = useMemo(
     () => ({
@@ -115,7 +104,6 @@ export function LiftHost({
       getHostRect: () => windowRect(hostRef.current),
       offsetX,
       offsetY,
-      clipShift,
       send: (event: LiftEvent<SlotHandle>) => {
         state.current = transition(state.current, event);
         // Backdrop and scroll lock follow the owner, measuring included.
@@ -125,7 +113,7 @@ export function LiftHost({
       phase: () => state.current.phase,
       refresh: () => setTick((n) => n + 1),
     }),
-    [offsetX, offsetY, clipShift]
+    [offsetX, offsetY]
   );
   const lift = useMemo(() => ({ active }), [active]);
   useSystemDrop(active);
@@ -165,17 +153,11 @@ export function LiftHost({
             />
           )}
           <Animated.View
-            style={[StyleSheet.absoluteFill, clipStyle]}
+            style={[StyleSheet.absoluteFill, layerStyle]}
             pointerEvents="box-none"
             collapsable={false}
           >
-            <Animated.View
-              style={[StyleSheet.absoluteFill, layerStyle]}
-              pointerEvents="box-none"
-              collapsable={false}
-            >
-              <PortalHost name={HOST_NAME} style={StyleSheet.absoluteFill} />
-            </Animated.View>
+            <PortalHost name={HOST_NAME} style={StyleSheet.absoluteFill} />
           </Animated.View>
           {/* Laid out around the view once it is lifted; keyed so another
               slot's lift starts over. */}
@@ -239,17 +221,9 @@ function Chrome({
       safeArea: insets,
       screen: screen(),
     });
-    // Rule 4: the window's edge on the clipped side sits on the visible
-    // part's edge; the window is the host's size, moved by `clip`.
-    const { clip: cut, viewRect: v } = result;
-    const clip = !cut
-      ? 0
-      : cut.side === 'top'
-        ? v.y + cut.amount
-        : v.y + v.height - cut.amount - screen().height;
     // Not when the drop came first: a repeat lift would show the menu
     // around a view that never moved there.
-    if (slot.arrange(v, result.scale, clip)) {
+    if (slot.arrange(result.viewRect, result.scale, result.clip)) {
       setPlaced(result);
     }
   }, [
@@ -392,8 +366,8 @@ export type SlotHandle = {
   // Host-local rect of the lifted view (unscaled), if lifted.
   rect(): Rect | undefined;
   // Move and scale the lifted view to `view` (its scaled visual rect) and
-  // move the clip window by `clip`; false if it is no longer lifted.
-  arrange(view: Rect, scale: number, clip: number): boolean;
+  // cut `clip` (screen units) off it; false if it is no longer lifted.
+  arrange(view: Rect, scale: number, clip?: LayoutResult['clip']): boolean;
   // restoreFocus: false skips AC-E6's restore for this drop (a menu item
   // that navigates).
   drop(opts?: { immediate?: boolean; restoreFocus?: boolean }): void;
@@ -402,7 +376,10 @@ export type SlotHandle = {
 const near = (a: Origin, b: Origin) =>
   Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
 const ORIGIN = { x: 0, y: 0 };
-const UNPLACED = { x: 0, y: 0, scale: 1, clip: 0 };
+// Layout rule 4: what is cut off the lifted view, in its own (unscaled) units.
+type Cut = { top: number; bottom: number };
+const NO_CUT: Cut = { top: 0, bottom: 0 };
+const UNPLACED = { x: 0, y: 0, scale: 1, cut: NO_CUT };
 
 export function LiftSlot({
   children,
@@ -429,8 +406,7 @@ export function LiftSlot({
   if (!host) {
     throw new Error('react-native-lift: wrap your app in <LiftProvider>');
   }
-  const { getHostRect, offsetX, offsetY, clipShift, send, phase, refresh } =
-    host;
+  const { getHostRect, offsetX, offsetY, send, phase, refresh } = host;
   const wrapperRef = useRef<HostInstance>(null);
   const size = useRef({ width: 0, height: 0 });
   const [lifted, setLifted] = useState<Lifted | null>(null);
@@ -455,8 +431,11 @@ export function LiftSlot({
   const dropFocus = useRef(true);
   // When the current drop's fade-out (and scale back) ends (Date.now() ms).
   const fadeEnd = useRef(0);
-  // Where arrange() put the lifted view: layer offset, scale and clip.
+  // Where arrange() put the lifted view: layer offset, scale and cut.
   const place = useRef(UNPLACED);
+  // The cut being shown: set once per arrange, not animated. The clip views
+  // sit inside the container, so the cut edge moves and scales with it.
+  const [cut, setCut] = useState(NO_CUT);
   const liftScale = useSharedValue(1);
   const mounted = useRef(true);
   // Read through refs: the once-created api closure calls restore/start.
@@ -521,10 +500,8 @@ export function LiftSlot({
       if (place.current.scale !== 1) {
         liftScale.value = 1;
       }
-      if (place.current.clip !== 0) {
-        clipShift.value = 0;
-      }
       place.current = UNPLACED;
+      setCut(NO_CUT);
     }
     setLifted(next);
     if (!next && !wasLifted.current) {
@@ -626,7 +603,6 @@ export function LiftSlot({
     // The layer is ours now; clear what a drop cut short by an unmount left.
     offsetX.value = 0;
     offsetY.value = 0;
-    clipShift.value = 0;
     // B1: one commit flips hostName, sets the host-local rect, and locks
     // the wrapper to its untransformed onLayout size.
     commit({
@@ -663,13 +639,13 @@ export function LiftSlot({
         x: view.x - (at.left + (at.width * (1 - s)) / 2),
         y: view.y - (at.top + (at.height * (1 - s)) / 2),
         scale: s,
-        clip,
+        cut: !clip ? NO_CUT : { ...NO_CUT, [clip.side]: clip.amount / s },
       };
+      setCut(place.current.cut);
       const timing = latest.current.moveTiming;
       offsetX.value = withTiming(place.current.x, timing);
       offsetY.value = withTiming(place.current.y, timing);
       liftScale.value = withTiming(s, timing);
-      clipShift.value = withTiming(clip, timing);
       return true;
     },
     lift() {
@@ -684,7 +660,7 @@ export function LiftSlot({
         offsetX.value = withTiming(place.current.x, timing);
         offsetY.value = withTiming(place.current.y, timing);
         liftScale.value = withTiming(place.current.scale, timing);
-        clipShift.value = withTiming(place.current.clip, timing);
+        setCut(place.current.cut);
         return 'repeat';
       }
       liftKey.current = latest.current.itemKey;
@@ -777,12 +753,11 @@ export function LiftSlot({
         return;
       }
       if (fading) {
-        // A scaled (or clipped) view grows back over the move; a moved one
-        // is also animated by settle.
-        const scaled = place.current.scale !== 1 || place.current.clip !== 0;
+        // A scaled view shrinks back over the move; a moved one is also
+        // animated by settle.
+        const scaled = place.current.scale !== 1;
         if (scaled) {
           liftScale.value = withTiming(1, latest.current.moveTiming);
-          clipShift.value = withTiming(0, latest.current.moveTiming);
         }
         fadeEnd.current =
           Date.now() +
@@ -791,6 +766,9 @@ export function LiftSlot({
             scaled ? (latest.current.moveTiming?.duration ?? 300) : 0
           );
       }
+      // The cut part lies outside the safe area here: shown again at once,
+      // so the view grows back whole.
+      setCut(NO_CUT);
       settle(token, from);
     },
   };
@@ -811,7 +789,6 @@ export function LiftSlot({
       if (liftedRef.current) {
         offsetX.value = 0;
         offsetY.value = 0;
-        clipShift.value = 0;
         // No-op on a real unmount; on a hide/re-show (Fast Refresh, Suspense,
         // Activity) the isLifted effect then drops cleanly.
         commit(null);
@@ -820,7 +797,7 @@ export function LiftSlot({
     };
     // commit() reads refs and stable context functions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offsetX, offsetY, clipShift, send]);
+  }, [offsetX, offsetY, send]);
 
   // The menu and accessory render in the host but close over this slot's
   // props: re-render the host when they change while lifted.
@@ -834,6 +811,7 @@ export function LiftSlot({
   // commit (the overlay never shows the new item); the effect below syncs.
   const shown = lifted && lifted.key === itemKey ? lifted : null;
   const isLifted = shown !== null;
+  const clipped = shown !== null && cut !== NO_CUT;
   useLayoutEffect(() => {
     // Rebound (itemKey), before or after the lifted render: finish the drop
     // the render above already shows.
@@ -910,7 +888,15 @@ export function LiftSlot({
             containerStyle,
           ]}
         >
-          {children}
+          {/* Rule 4: plain views, so the handoff path gains no animated
+              component. Uncut, both just fill the container (layout only,
+              flattened); cut, the outer one is the visible part and the inner
+              one keeps the view's own size, shifted under it. */}
+          <View style={clipped ? clipRect(shown, cut) : styles.fill}>
+            <View style={clipped ? innerRect(shown, cut) : styles.fill}>
+              {children}
+            </View>
+          </View>
         </Animated.View>
       </Portal>
     </View>
@@ -921,6 +907,17 @@ const rectOf = ({ left, top, width, height }: Lifted) => ({
   left,
   top,
   width,
+  height,
+});
+
+const clipRect = ({ height }: Lifted, { top, bottom }: Cut) => ({
+  overflow: 'hidden' as const,
+  marginTop: top,
+  height: height - top - bottom,
+});
+
+const innerRect = ({ height }: Lifted, { top }: Cut) => ({
+  marginTop: -top,
   height,
 });
 
