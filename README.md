@@ -22,6 +22,16 @@ const result = multiply(3, 7);
 ```
 
 
+## Known limitations
+
+### Android: one tap ignored after a long press on `VideoView`
+
+On Android, after a long press that starts on an expo-video `VideoView` (`nativeControls={false}`), the next single tap anywhere in the app is ignored. Later taps work.
+
+- **Cause:** react-native-gesture-handler intercepts the long press, then sends a cancel for that touch when the next tap starts. `VideoView` forwards that cancel to JS itself, and the cancel ends the new tap. This applies to any native view that forwards its own touches to JS. A `WebView` is not affected.
+- **Not caused by lifting:** any react-native-gesture-handler long press on a `VideoView` does the same, without react-native-lift.
+- **Workaround:** wrap the video in `<View pointerEvents="none">`. **Side effect:** the `VideoView` then receives no touches at all, lifted or not. Taps on the video itself do nothing.
+
 ## Contributing
 
 - [Development workflow](CONTRIBUTING.md#development-workflow)
