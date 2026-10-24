@@ -21,6 +21,15 @@ const SEED: Message[] = Array.from({ length: 40 }, (_, i) => ({
     i % 3 === 0 ? `Message ${40 - i}, a longer one that wraps` : `Hi ${40 - i}`,
   mine: i % 2 === 0,
 }));
+// Too tall even at minScale: lifted, the side opposite the menu is clipped.
+SEED.splice(1, 0, {
+  id: 100,
+  text: Array.from(
+    { length: 90 },
+    (_, i) => `Long message, line ${i + 1}`
+  ).join('\n'),
+  mine: false,
+});
 
 export function ChatScreen() {
   const scrollEnabled = useLiftScrollLock();

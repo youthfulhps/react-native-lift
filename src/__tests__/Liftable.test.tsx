@@ -685,7 +685,7 @@ test('E7: menu titles as accessibility actions, run without a lift or haptics', 
   expect(screen.queryByTestId('lift-backdrop')).toBeNull();
 });
 
-test('a view too tall for the menu shrinks, and grows back before it drops', async () => {
+test('a view too tall for the menu shrinks and is clipped, and grows back before it drops', async () => {
   jest.useFakeTimers();
   // 60dp view, 88dp menu, 100dp screen: it scales to the 0.5 floor.
   jest
@@ -693,13 +693,28 @@ test('a view too tall for the menu shrinks, and grows back before it drops', asy
     .mockReturnValue({ width: 300, height: 100 } as never);
   const ref = { current: null as LiftHandle | null };
   const onLiftEnd = jest.fn();
-  await render(app({ ref, menu: menuItems(), onLiftEnd }));
+  await render(
+    <LiftProvider insets={{ top: 0, bottom: 7, left: 0, right: 0 }}>
+      <Row ref={ref} menu={menuItems()} onLiftEnd={onLiftEnd} />
+    </LiftProvider>
+  );
   await longPress();
   await placeChrome();
   expect(mockAnimations.some((a) => a.to === 0.5)).toBe(true);
+  // Rule 4: still too tall at 0.5, so the side opposite the menu (above
+  // it) is cut: the clip window's bottom edge moves to the visible bottom.
+  const r = jest.mocked(computeLayout).mock.results.at(-1)!.value as ReturnType<
+    typeof computeLayout
+  >;
+  expect(r.clip?.side).toBe('bottom');
+  const visibleBottom = r.viewRect.y + r.viewRect.height - r.clip!.amount;
+  expect(visibleBottom).toBe(93);
+  expect(mockAnimations.some((a) => a.to === -7)).toBe(true);
   mockAnimations.length = 0;
   await act(() => ref.current!.drop());
   expect(mockAnimations.some((a) => a.to === 1)).toBe(true);
+  // The window opens back to the whole host over the same move.
+  expect(mockAnimations.filter((a) => a.to === 0)).not.toHaveLength(0);
   // The scale back (300ms) outlasts the fade (200ms).
   await act(() => jest.advanceTimersByTime(250));
   expect(onLiftEnd).not.toHaveBeenCalled();

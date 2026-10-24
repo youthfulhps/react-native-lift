@@ -17,9 +17,9 @@ export function Clip() {
     p.muted = true;
     p.play();
   });
-  // pointerEvents none: on Android a long press that starts on the native
-  // video view leaves the overlay's touches dead until the drop (it takes
-  // the touch, then moves mid-gesture). These clips need no touches anyway.
+  // pointerEvents none: on Android, after a long press that starts on the
+  // native video view, the next tap anywhere is lost (expo-video forwards
+  // the stale touch's cancel to JS). These clips need no touches anyway.
   return (
     <View pointerEvents="none">
       <VideoView player={player} nativeControls={false} style={styles.video} />

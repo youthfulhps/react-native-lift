@@ -69,6 +69,17 @@ describe('computeLayout', () => {
     expectInsideSafe(r.accessoryRect);
   });
 
+  it('huge view scrolled up: menu below, clipped on top', () => {
+    const viewRect = { x: 20, y: -1500, width: 360, height: 2000 };
+    const r = layout({ viewRect });
+
+    expect(r.scale).toBe(0.5);
+    expect(r.menuRect.y).toBeGreaterThan(r.viewRect.y);
+    expect(r.clip?.side).toBe('top');
+    expect(r.viewRect.y + (r.clip?.amount ?? 0)).toBe(safeArea.top);
+    expectInsideSafe(r.menuRect);
+  });
+
   it('accessory top: accessory sits above the view', () => {
     const viewRect = { x: 20, y: 300, width: 360, height: 100 };
     const r = layout({ viewRect, accessorySize, accessoryPosition: 'top' });

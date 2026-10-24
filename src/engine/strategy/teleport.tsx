@@ -60,6 +60,9 @@ type HostContextValue = {
   // transform of its own and the re-parent lands on the same pixels.
   offsetX: SharedValue<number>;
   offsetY: SharedValue<number>;
+  // Layout rule 4: vertical shift of the clip window around that layer (0:
+  // the whole host, no clip). The window moves by it, the layer back by it.
+  clipShift: SharedValue<number>;
   // Runs the one-lift-at-a-time machine (liftState.ts); returns the new state.
   send: (event: LiftEvent<SlotHandle>) => LiftState<SlotHandle>;
   phase: () => LiftState<SlotHandle>['phase'];
@@ -90,13 +93,21 @@ export function LiftHost({
   const hostSize = useRef<Size | null>(null);
   const offsetX = useSharedValue(0);
   const offsetY = useSharedValue(0);
+  const clipShift = useSharedValue(0);
   // Rendered copy of the machine: owner (backdrop, scroll lock) and phase.
   const [shown, setShown] = useState<LiftState<SlotHandle>>(IDLE);
   const [, setTick] = useState(0);
   const active = shown.phase === 'idle' ? null : shown.slot;
   const state = useRef<LiftState<SlotHandle>>(IDLE);
+  const clipStyle = useAnimatedStyle(() => ({
+    overflow: clipShift.value === 0 ? 'visible' : 'hidden',
+    transform: [{ translateY: clipShift.value }],
+  }));
   const layerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }],
+    transform: [
+      { translateX: offsetX.value },
+      { translateY: offsetY.value - clipShift.value },
+    ],
   }));
   const value = useMemo(
     () => ({
@@ -104,6 +115,7 @@ export function LiftHost({
       getHostRect: () => windowRect(hostRef.current),
       offsetX,
       offsetY,
+      clipShift,
       send: (event: LiftEvent<SlotHandle>) => {
         state.current = transition(state.current, event);
         // Backdrop and scroll lock follow the owner, measuring included.
@@ -113,7 +125,7 @@ export function LiftHost({
       phase: () => state.current.phase,
       refresh: () => setTick((n) => n + 1),
     }),
-    [offsetX, offsetY]
+    [offsetX, offsetY, clipShift]
   );
   const lift = useMemo(() => ({ active }), [active]);
   useSystemDrop(active);
@@ -153,11 +165,17 @@ export function LiftHost({
             />
           )}
           <Animated.View
-            style={[StyleSheet.absoluteFill, layerStyle]}
+            style={[StyleSheet.absoluteFill, clipStyle]}
             pointerEvents="box-none"
             collapsable={false}
           >
-            <PortalHost name={HOST_NAME} style={StyleSheet.absoluteFill} />
+            <Animated.View
+              style={[StyleSheet.absoluteFill, layerStyle]}
+              pointerEvents="box-none"
+              collapsable={false}
+            >
+              <PortalHost name={HOST_NAME} style={StyleSheet.absoluteFill} />
+            </Animated.View>
           </Animated.View>
           {/* Laid out around the view once it is lifted; keyed so another
               slot's lift starts over. */}
@@ -221,9 +239,17 @@ function Chrome({
       safeArea: insets,
       screen: screen(),
     });
+    // Rule 4: the window's edge on the clipped side sits on the visible
+    // part's edge; the window is the host's size, moved by `clip`.
+    const { clip: cut, viewRect: v } = result;
+    const clip = !cut
+      ? 0
+      : cut.side === 'top'
+        ? v.y + cut.amount
+        : v.y + v.height - cut.amount - screen().height;
     // Not when the drop came first: a repeat lift would show the menu
     // around a view that never moved there.
-    if (slot.arrange(result.viewRect, result.scale)) {
+    if (slot.arrange(v, result.scale, clip)) {
       setPlaced(result);
     }
   }, [
@@ -365,9 +391,9 @@ export type SlotHandle = {
   };
   // Host-local rect of the lifted view (unscaled), if lifted.
   rect(): Rect | undefined;
-  // Move and scale the lifted view to `view` (its scaled visual rect);
-  // false if it is no longer lifted.
-  arrange(view: Rect, scale: number): boolean;
+  // Move and scale the lifted view to `view` (its scaled visual rect) and
+  // move the clip window by `clip`; false if it is no longer lifted.
+  arrange(view: Rect, scale: number, clip: number): boolean;
   // restoreFocus: false skips AC-E6's restore for this drop (a menu item
   // that navigates).
   drop(opts?: { immediate?: boolean; restoreFocus?: boolean }): void;
@@ -376,7 +402,7 @@ export type SlotHandle = {
 const near = (a: Origin, b: Origin) =>
   Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
 const ORIGIN = { x: 0, y: 0 };
-const UNPLACED = { x: 0, y: 0, scale: 1 };
+const UNPLACED = { x: 0, y: 0, scale: 1, clip: 0 };
 
 export function LiftSlot({
   children,
@@ -403,7 +429,8 @@ export function LiftSlot({
   if (!host) {
     throw new Error('react-native-lift: wrap your app in <LiftProvider>');
   }
-  const { getHostRect, offsetX, offsetY, send, phase, refresh } = host;
+  const { getHostRect, offsetX, offsetY, clipShift, send, phase, refresh } =
+    host;
   const wrapperRef = useRef<HostInstance>(null);
   const size = useRef({ width: 0, height: 0 });
   const [lifted, setLifted] = useState<Lifted | null>(null);
@@ -428,7 +455,7 @@ export function LiftSlot({
   const dropFocus = useRef(true);
   // When the current drop's fade-out (and scale back) ends (Date.now() ms).
   const fadeEnd = useRef(0);
-  // Where arrange() put the lifted view: layer offset and scale.
+  // Where arrange() put the lifted view: layer offset, scale and clip.
   const place = useRef(UNPLACED);
   const liftScale = useSharedValue(1);
   const mounted = useRef(true);
@@ -493,6 +520,9 @@ export function LiftSlot({
       // No write at all for a view that was never arranged.
       if (place.current.scale !== 1) {
         liftScale.value = 1;
+      }
+      if (place.current.clip !== 0) {
+        clipShift.value = 0;
       }
       place.current = UNPLACED;
     }
@@ -596,6 +626,7 @@ export function LiftSlot({
     // The layer is ours now; clear what a drop cut short by an unmount left.
     offsetX.value = 0;
     offsetY.value = 0;
+    clipShift.value = 0;
     // B1: one commit flips hostName, sets the host-local rect, and locks
     // the wrapper to its untransformed onLayout size.
     commit({
@@ -622,7 +653,7 @@ export function LiftSlot({
         ? { x: at.left, y: at.top, width: at.width, height: at.height }
         : undefined;
     },
-    arrange(view, s) {
+    arrange(view, s, clip) {
       const at = liftedRef.current;
       if (!at || phase() !== 'lifted') {
         return false;
@@ -632,11 +663,13 @@ export function LiftSlot({
         x: view.x - (at.left + (at.width * (1 - s)) / 2),
         y: view.y - (at.top + (at.height * (1 - s)) / 2),
         scale: s,
+        clip,
       };
       const timing = latest.current.moveTiming;
       offsetX.value = withTiming(place.current.x, timing);
       offsetY.value = withTiming(place.current.y, timing);
       liftScale.value = withTiming(s, timing);
+      clipShift.value = withTiming(clip, timing);
       return true;
     },
     lift() {
@@ -651,6 +684,7 @@ export function LiftSlot({
         offsetX.value = withTiming(place.current.x, timing);
         offsetY.value = withTiming(place.current.y, timing);
         liftScale.value = withTiming(place.current.scale, timing);
+        clipShift.value = withTiming(place.current.clip, timing);
         return 'repeat';
       }
       liftKey.current = latest.current.itemKey;
@@ -743,11 +777,12 @@ export function LiftSlot({
         return;
       }
       if (fading) {
-        // A scaled view shrinks back over the move; a moved one is also
-        // animated by settle.
-        const scaled = place.current.scale !== 1;
+        // A scaled (or clipped) view grows back over the move; a moved one
+        // is also animated by settle.
+        const scaled = place.current.scale !== 1 || place.current.clip !== 0;
         if (scaled) {
           liftScale.value = withTiming(1, latest.current.moveTiming);
+          clipShift.value = withTiming(0, latest.current.moveTiming);
         }
         fadeEnd.current =
           Date.now() +
@@ -776,6 +811,7 @@ export function LiftSlot({
       if (liftedRef.current) {
         offsetX.value = 0;
         offsetY.value = 0;
+        clipShift.value = 0;
         // No-op on a real unmount; on a hide/re-show (Fast Refresh, Suspense,
         // Activity) the isLifted effect then drops cleanly.
         commit(null);
@@ -784,7 +820,7 @@ export function LiftSlot({
     };
     // commit() reads refs and stable context functions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offsetX, offsetY, send]);
+  }, [offsetX, offsetY, clipShift, send]);
 
   // The menu and accessory render in the host but close over this slot's
   // props: re-render the host when they change while lifted.
