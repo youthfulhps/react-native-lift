@@ -1,9 +1,9 @@
 # P6: long-press a message while the keyboard is open. env AUTO = off | one
 # | flood (messages arriving while lifted), ROUNDS, KB = 1 (default) | 0
 # (keyboard closed: the input is never focused), RESTORE = 1 (default) | 0
-# (diagnosis: Liftable restoreFocus off; each round refocuses the input
-# itself). The screen drops by itself 4.5s after the lift; focus must come
-# back to the input.
+# (diagnosis: the screen skips its focus restore; each round refocuses the
+# input itself). The screen drops by itself 4.5s after the lift and, after
+# the drop window, gives focus back to the input.
 appId: lift.example
 env:
   KB: ${KB || "1"}

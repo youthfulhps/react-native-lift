@@ -90,11 +90,22 @@ const Message = memo(function MessageView({
   const isTarget = id === TARGET;
   // Felt latency (long press activated -> onLiftStart): the first frame the
   // press scale leaves 1 is onBegin (+<=1 frame), stamped on the UI thread.
-  const press = useRef({ at: 0, keyboard: false, hiddenAt: 0 });
+  // `input` had focus at the press: the screen restores it after the drop.
+  const press = useRef({
+    at: 0,
+    keyboard: false,
+    hiddenAt: 0,
+    input: null as HostInstance | null,
+  });
   // drop() call time: delays to onLiftEnd and to the focus restore.
   const dropAt = useRef(0);
   const pressed = useCallback((at: number) => {
-    press.current = { at, keyboard: Keyboard.isVisible(), hiddenAt: 0 };
+    press.current = {
+      at,
+      keyboard: Keyboard.isVisible(),
+      hiddenAt: 0,
+      input: TextInput.State.currentlyFocusedInput() ?? null,
+    };
   }, []);
   useAnimatedReaction(
     () => scale.value < 1,
@@ -176,7 +187,8 @@ const Message = memo(function MessageView({
     <Liftable
       ref={handle}
       scale={scale}
-      restoreFocus={restore}
+      // The screen restores focus itself, after the drop window.
+      restoreFocus={false}
       renderBackdrop={dim ? undefined : noBackdrop}
       onLiftStart={async () => {
         status.lifted = true;
@@ -224,10 +236,18 @@ const Message = memo(function MessageView({
           probe.mark('drop', ctx.current);
         }
         const ended = Date.now() - dropAt.current;
-        // Before the engine's focus restore (2 frames after the commit)
-        // reopens the keyboard and moves the list.
-        await frames(2);
+        // The drop window keeps 6 frames after the commit, then closes
+        // before the keyboard reopens and moves the list: the engine's
+        // restore (2 frames after the commit) is off here, and the
+        // screen refocuses once the closed gate is on screen.
+        await frames(6);
         gate.value = 0;
+        const closed = Date.now() - dropAt.current;
+        await frames(2);
+        const { input } = press.current;
+        if (restore && input) {
+          TextInput.State.focusTextInput(input);
+        }
         if (isTarget && dropAt.current) {
           let focus = -1;
           for (let i = 0; i < 60 && focus < 0; i++) {
@@ -239,7 +259,8 @@ const Message = memo(function MessageView({
           }
           dropAt.current = 0;
           console.log(
-            `P6 DROP auto=${auto} onLiftEnd=${ended}ms focus=${focus < 0 ? '-' : `${focus}ms`}`
+            `P6 DROP auto=${auto} onLiftEnd=${ended}ms close=${closed}ms ` +
+              `focus=${focus < 0 ? '-' : `${focus}ms`}`
           );
         }
       }}
@@ -274,7 +295,7 @@ export function KeyboardChatScreen() {
   // Inverted: index 0 is the newest message, drawn at the bottom.
   const [ids, setIds] = useState(() => Array.from({ length: 30 }, (_, i) => i));
   const [auto, setAuto] = useState<Auto>('off');
-  // Diagnosis only (Step 2.2): off removes the keyboard reopening after drop.
+  // Diagnosis only (Step 2.2): off skips the focus restore after a drop.
   const [restore, setRestore] = useState(true);
   // Recording only (keyboard-path dim check): the default dim, off for measurements.
   const [dim, setDim] = useState(false);
