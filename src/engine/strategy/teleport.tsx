@@ -128,14 +128,16 @@ export function LiftHost({ children }: { children: ReactNode }) {
           pointerEvents="box-none"
           collapsable={false}
         >
-          {/* The owner's backdrop shows from the lift request on, so it
-              covers the keyboard wait before the teleport. Same position in
-              the tree while it fades out, so it is not remounted. */}
+          {/* Mounted from the lift request on, shown from the teleport: a
+              lift without a keyboard wait commits in the same batch, one
+              that waits stays under no dim until it is above it (no
+              brightness jump at the teleport). Same position in the tree
+              while it fades out, so it is not remounted. */}
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {backdrop && (
               <Backdrop
                 render={backdrop.renderBackdrop}
-                visible={!!active && shown.phase !== 'dropping'}
+                visible={shown.phase === 'lifted'}
               />
             )}
           </View>

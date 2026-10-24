@@ -66,11 +66,13 @@ const Message = memo(function MessageView({
   id,
   auto,
   restore,
+  dim,
   addMessages,
 }: {
   id: number;
   auto: Auto;
   restore: boolean;
+  dim: boolean;
   addMessages: (n: number) => void;
 }) {
   const handle = useLiftRef();
@@ -173,7 +175,7 @@ const Message = memo(function MessageView({
       ref={handle}
       scale={scale}
       restoreFocus={restore}
-      renderBackdrop={noBackdrop}
+      renderBackdrop={dim ? undefined : noBackdrop}
       onLiftStart={async () => {
         status.lifted = true;
         status.set({ lifted: true, lifts: ++status.lifts });
@@ -256,6 +258,8 @@ export function KeyboardChatScreen() {
   const [auto, setAuto] = useState<Auto>('off');
   // Diagnosis only (Step 2.2): off removes the keyboard reopening after drop.
   const [restore, setRestore] = useState(true);
+  // Recording only (keyboard-path dim check): the default dim, off for measurements.
+  const [dim, setDim] = useState(false);
   const scrollEnabled = useLiftScrollLock();
   const next = useRef(1000);
   const addMessages = useCallback(
@@ -291,6 +295,13 @@ export function KeyboardChatScreen() {
         >
           <Text>{`restore:${restore ? 'on' : 'off'}`}</Text>
         </Pressable>
+        <Pressable
+          testID="dim-toggle"
+          style={styles.button}
+          onPress={() => setDim((d) => !d)}
+        >
+          <Text>{`dim:${dim ? 'on' : 'off'}`}</Text>
+        </Pressable>
         <Gate />
       </View>
       <FlatList
@@ -306,6 +317,7 @@ export function KeyboardChatScreen() {
             id={item}
             auto={auto}
             restore={restore}
+            dim={dim}
             addMessages={addMessages}
           />
         )}

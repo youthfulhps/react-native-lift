@@ -210,11 +210,9 @@ test('the backdrop fades out after a drop, then unmounts', async () => {
   expect(mounts).toBe(1);
 });
 
-// Step 3.1: the feedback hides the keyboard wait. With the keyboard open the
-// teleport waits for it to close, but haptics and the backdrop start at once
-// and stay (no remount) through the teleport.
-test('keyboard open: feedback first, teleport after the hide', async () => {
-  jest.useFakeTimers();
+// An open keyboard that hides when lift() dismisses it; returns the
+// listeners lift() subscribed (keyboardWillHide, keyboardDidHide).
+function openKeyboard() {
   jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
   const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
   const listeners: Record<string, (e: { duration: number }) => void> = {};
@@ -225,6 +223,25 @@ test('keyboard open: feedback first, teleport after the hide', async () => {
     listeners[type] = fn;
     return { remove: () => {} };
   }) as never);
+  return { dismiss, listeners };
+}
+
+// iOS: the hide animation ends `duration` ms after keyboardWillHide, then
+// 3 still frames + 3 frames.
+async function hideKeyboard(
+  listeners: ReturnType<typeof openKeyboard>['listeners']
+) {
+  await act(() => listeners.keyboardWillHide!({ duration: 250 }));
+  await act(() => jest.advanceTimersByTime(250 + 20 * 16));
+}
+
+// With the keyboard open the teleport waits for it to close. Haptics come
+// at once; the backdrop mounts at once but shows only from the teleport, so
+// the view never sits under the dim (no brightness jump), and it is not
+// remounted.
+test('keyboard open: haptics first, backdrop shown at the teleport', async () => {
+  jest.useFakeTimers();
+  const { dismiss, listeners } = openKeyboard();
   const haptics = jest.fn();
   const onLiftStart = jest.fn();
   await render(
@@ -233,17 +250,35 @@ test('keyboard open: feedback first, teleport after the hide', async () => {
   await longPress();
   expect(dismiss).toHaveBeenCalled();
   expect(haptics).toHaveBeenCalledTimes(1);
-  expect(screen.getByText('visible:true')).toBeTruthy();
+  expect(screen.getByText('visible:false')).toBeTruthy();
   expect(onLiftStart).not.toHaveBeenCalled();
 
-  // iOS: the hide animation ends `duration` ms after keyboardWillHide, then
-  // 3 still frames + 3 frames.
-  await act(() => listeners.keyboardWillHide!({ duration: 250 }));
-  await act(() => jest.advanceTimersByTime(250 + 20 * 16));
+  await hideKeyboard(listeners);
   expect(onLiftStart).toHaveBeenCalledTimes(1);
   expect(haptics).toHaveBeenCalledTimes(1);
   expect(screen.getByText('visible:true')).toBeTruthy();
   expect(mounts).toBe(1);
+});
+
+test('dim start: at once without a keyboard, at the teleport with one', async () => {
+  const dimIn = { kind: 'timing', to: 0.25, config: { duration: 200 } };
+  await render(app());
+  await longPress();
+  expect(mockAnimations).toContainEqual(dimIn);
+
+  await screen.unmount();
+  mockAnimations.length = 0;
+  mockGestures.length = 0;
+  jest.useFakeTimers();
+  const { listeners } = openKeyboard();
+  const onLiftStart = jest.fn();
+  await render(app({ onLiftStart }));
+  await longPress();
+  expect(screen.getByTestId('lift-dim')).toBeTruthy();
+  expect(mockAnimations).not.toContainEqual(dimIn);
+  await hideKeyboard(listeners);
+  expect(onLiftStart).toHaveBeenCalledTimes(1);
+  expect(mockAnimations).toContainEqual(dimIn);
 });
 
 test('the default dim fades to 0 over its duration on a drop', async () => {
