@@ -91,6 +91,8 @@ const Message = memo(function MessageView({
   // Felt latency (long press activated -> onLiftStart): the first frame the
   // press scale leaves 1 is onBegin (+<=1 frame), stamped on the UI thread.
   const press = useRef({ at: 0, keyboard: false, hiddenAt: 0 });
+  // drop() call time: delays to onLiftEnd and to the focus restore.
+  const dropAt = useRef(0);
   const pressed = useCallback((at: number) => {
     press.current = { at, keyboard: Keyboard.isVisible(), hiddenAt: 0 };
   }, []);
@@ -211,6 +213,7 @@ const Message = memo(function MessageView({
         setTimeout(async () => {
           gate.value = 1;
           await frames(3);
+          dropAt.current = Date.now();
           handle.current?.drop();
         }, 4500);
       }}
@@ -220,10 +223,25 @@ const Message = memo(function MessageView({
         if (isTarget && ctx.current) {
           probe.mark('drop', ctx.current);
         }
+        const ended = Date.now() - dropAt.current;
         // Before the engine's focus restore (2 frames after the commit)
         // reopens the keyboard and moves the list.
         await frames(2);
         gate.value = 0;
+        if (isTarget && dropAt.current) {
+          let focus = -1;
+          for (let i = 0; i < 60 && focus < 0; i++) {
+            if (TextInput.State.currentlyFocusedInput()) {
+              focus = Date.now() - dropAt.current;
+            } else {
+              await frames(1);
+            }
+          }
+          dropAt.current = 0;
+          console.log(
+            `P6 DROP auto=${auto} onLiftEnd=${ended}ms focus=${focus < 0 ? '-' : `${focus}ms`}`
+          );
+        }
       }}
     >
       <View ref={content} collapsable={false} style={styles.message}>

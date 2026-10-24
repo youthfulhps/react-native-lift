@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { useEffect } from 'react';
-import { Keyboard, Text, View } from 'react-native';
+import { AppState, Dimensions, Keyboard, Text, View } from 'react-native';
 import { LiftProvider } from '../LiftProvider';
 import { Liftable, type LiftableProps } from '../Liftable';
 import type { LiftHandle } from '../types';
@@ -63,8 +63,9 @@ jest.mock('react-native-teleport', () => ({
 // No layout in jest: every view sits at a fixed on-screen rect.
 jest.mock('../engine/measure', () => ({
   windowRect: () => ({ x: 0, y: 100, width: 300, height: 60 }),
-  isUsable: () => true,
+  isUsable: () => mockUsable,
 }));
+let mockUsable = true;
 
 const layout = {
   nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 60 } },
@@ -101,6 +102,11 @@ const app = (props: RowProps = {}) => (
 
 // Shows `visible` and counts mounts (a remount would restart a fade).
 let mounts = 0;
+// System event handlers useSystemDrop subscribed (rotation, AppState).
+const mockSystem: {
+  dimensions?: () => void;
+  appState?: (state: string) => void;
+} = {};
 function Probe({ visible }: { visible: boolean }) {
   useEffect(() => {
     mounts++;
@@ -109,6 +115,7 @@ function Probe({ visible }: { visible: boolean }) {
 }
 
 beforeEach(() => {
+  mockUsable = true;
   mockGestures.length = 0;
   mockAnimations.length = 0;
   mounts = 0;
@@ -188,24 +195,30 @@ test('motion reaches the gesture and the release spring', async () => {
   });
 });
 
-test('the backdrop fades out after a drop, then unmounts', async () => {
+// No brightness jump on a drop: the view stays lifted (above the dim)
+// until the dim has faded out, then goes back.
+test('a drop commits only once the dim has faded out', async () => {
   jest.useFakeTimers();
   const ref = { current: null as LiftHandle | null };
+  const onLiftEnd = jest.fn();
   await render(
     app({
       ref,
+      onLiftEnd,
       renderBackdrop: (s) => <Probe {...s} />,
       motion: { backdrop: { duration: 250 } },
     })
   );
   await longPress();
-  // Unmoved: the drop commits at once and the host goes idle in that batch.
+  // Unmoved: nothing to animate, only the fade to wait for.
   await act(() => ref.current!.drop());
-  expect(screen.queryByTestId('lift-backdrop')).toBeNull();
   expect(screen.getByText('visible:false')).toBeTruthy();
   await act(() => jest.advanceTimersByTime(249));
+  expect(onLiftEnd).not.toHaveBeenCalled();
   expect(screen.getByText('visible:false')).toBeTruthy();
-  await act(() => jest.advanceTimersByTime(1));
+  // The fade's end, then a frame.
+  await act(() => jest.advanceTimersByTime(1 + 16));
+  expect(onLiftEnd).toHaveBeenCalledTimes(1);
   expect(screen.queryByTestId('custom-backdrop')).toBeNull();
   expect(mounts).toBe(1);
 });
@@ -295,35 +308,71 @@ test('the default dim fades to 0 over its duration on a drop', async () => {
   });
 });
 
-test('another lift during the fade keeps the backdrop past the old deadline', async () => {
+// Drops with no animation do not wait for the fade: the view goes back
+// and the backdrop goes in the same act, no timers advanced.
+test.each<
+  [
+    string,
+    (ref: LiftHandle, rerender: (props: RowProps) => Promise<void>) => unknown,
+  ]
+>([
+  ['drop({ immediate: true })', (ref) => ref.drop({ immediate: true })],
+  [
+    "drop({ immediate: true }) during a drop's fade wait",
+    (ref) => {
+      ref.drop();
+      ref.drop({ immediate: true });
+    },
+  ],
+  ['itemKey change', (_, rerender) => rerender({ itemKey: 'b' })],
+  ['rotation (window change)', () => mockSystem.dimensions!()],
+  ['going to the background', () => mockSystem.appState!('background')],
+  [
+    'measure null / off screen',
+    (ref) => {
+      mockUsable = false;
+      ref.drop();
+    },
+  ],
+])('immediate drop, no fade wait: %s', async (_, run) => {
   jest.useFakeTimers();
-  const a = { current: null as LiftHandle | null };
-  const fade = { backdrop: { duration: 250 } };
-  const backdrop = (s: { visible: boolean }) => <Probe {...s} />;
-  await render(
-    <LiftProvider>
-      <Row ref={a} motion={fade} renderBackdrop={backdrop} />
-      <Row motion={fade} renderBackdrop={backdrop} />
-    </LiftProvider>
+  jest.spyOn(Dimensions, 'addEventListener').mockImplementation(((
+    _type: string,
+    fn: () => void
+  ) => {
+    mockSystem.dimensions = fn;
+    return { remove: () => {} };
+  }) as never);
+  jest.spyOn(AppState, 'addEventListener').mockImplementation(((
+    _type: string,
+    fn: (s: string) => void
+  ) => {
+    mockSystem.appState = fn;
+    return { remove: () => {} };
+  }) as never);
+  const ref = { current: null as LiftHandle | null };
+  const onLiftEnd = jest.fn();
+  const props = (extra: RowProps = {}): RowProps => ({
+    ref,
+    onLiftEnd,
+    itemKey: 'a',
+    renderBackdrop: (s) => <Probe {...s} />,
+    ...extra,
+  });
+  await render(app(props()));
+  await longPress();
+  expect(screen.getByText('visible:true')).toBeTruthy();
+  await act(() =>
+    run(ref.current!, (extra) => screen.rerender(app(props(extra))))
   );
-  await longPress(0);
-  await act(() => a.current!.drop());
-  expect(screen.getByText('visible:false')).toBeTruthy();
-  await act(() => jest.advanceTimersByTime(100));
-  await longPress(1);
-  expect(screen.getByText('visible:true')).toBeTruthy();
-  // A's fade timer (250ms) must not take B's backdrop with it.
-  await act(() => jest.advanceTimersByTime(500));
-  expect(screen.getByText('visible:true')).toBeTruthy();
-  expect(mounts).toBe(1);
+  expect(onLiftEnd).toHaveBeenCalledTimes(1);
+  expect(screen.queryByTestId('custom-backdrop')).toBeNull();
+  expect(screen.queryByTestId('lift-backdrop')).toBeNull();
 });
 
-test('a slot unmounted during its fade: the backdrop still fades, then goes', async () => {
+test('unmounted while lifted: the backdrop goes at once', async () => {
   jest.useFakeTimers();
-  const ref = { current: null as LiftHandle | null };
   const props = {
-    ref,
-    motion: { backdrop: { duration: 250 } },
     renderBackdrop: (s: { visible: boolean }) => <Probe {...s} />,
   };
   const tree = (show: boolean) => (
@@ -331,11 +380,9 @@ test('a slot unmounted during its fade: the backdrop still fades, then goes', as
   );
   await render(tree(true));
   await longPress();
-  await act(() => ref.current!.drop());
   await screen.rerender(tree(false));
-  expect(screen.getByText('visible:false')).toBeTruthy();
-  await act(() => jest.advanceTimersByTime(250));
   expect(screen.queryByTestId('custom-backdrop')).toBeNull();
+  expect(screen.queryByTestId('lift-backdrop')).toBeNull();
 });
 
 test('a lift that fails at once (no layout yet) leaves no backdrop', async () => {

@@ -33,7 +33,9 @@ export type LiftableProps = Omit<
   // Override any motion value (AC-M1); the rest keep their defaults.
   motion?: MotionOverride;
   // Replaces the default dim (AC-M3), e.g. with a blur. Animate on
-  // `visible`: it stays mounted for motion.backdrop.duration after a drop.
+  // `visible` over motion.backdrop.duration: a drop puts the view back once
+  // that fade is done. Drops with no animation (rotation, background,
+  // unmount, itemKey change, drop({ immediate: true })) remove it at once.
   // Return an element and keep hooks inside its component (the host may
   // reuse one instance across owners). It receives no touches: a tap
   // anywhere outside the lifted view drops it.

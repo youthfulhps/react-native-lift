@@ -1,7 +1,6 @@
 import {
   createContext,
   useContext,
-  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -72,24 +71,6 @@ export function LiftHost({ children }: { children: ReactNode }) {
   // Rendered copy of the machine: owner (backdrop, scroll lock) and phase.
   const [shown, setShown] = useState<LiftState<SlotHandle>>(IDLE);
   const active = shown.phase === 'idle' ? null : shown.slot;
-  // The last owner's backdrop stays mounted (hidden, untouchable) for its
-  // fade-out after the host goes idle: an unmoved drop goes idle in the
-  // same batch, which would otherwise cut the backdrop in one frame.
-  const [fading, setFading] = useState<SlotHandle | null>(null);
-  useEffect(() => {
-    if (!fading) {
-      return undefined;
-    }
-    const timer = setTimeout(() => setFading(null), fading.backdropFade());
-    return () => clearTimeout(timer);
-  }, [fading]);
-  const backdrop = active ?? fading;
-  // Owner whose backdrop has been rendered: a lift that failed in the same
-  // batch it started in never showed one, so it leaves nothing to fade.
-  const rendered = useRef<SlotHandle | null>(null);
-  useLayoutEffect(() => {
-    rendered.current = active;
-  }, [active]);
   const state = useRef<LiftState<SlotHandle>>(IDLE);
   const layerStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }],
@@ -101,15 +82,9 @@ export function LiftHost({ children }: { children: ReactNode }) {
       offsetX,
       offsetY,
       send: (event: LiftEvent<SlotHandle>) => {
-        const prev = state.current;
-        state.current = transition(prev, event);
+        state.current = transition(state.current, event);
         // Backdrop and scroll lock follow the owner, measuring included.
         setShown(state.current);
-        if (state.current.phase !== 'idle') {
-          setFading(null);
-        } else if (prev.phase !== 'idle' && rendered.current === prev.slot) {
-          setFading(prev.slot);
-        }
         return state.current;
       },
       phase: () => state.current.phase,
@@ -128,15 +103,15 @@ export function LiftHost({ children }: { children: ReactNode }) {
           pointerEvents="box-none"
           collapsable={false}
         >
-          {/* Mounted from the lift request on, shown from the teleport: a
-              lift without a keyboard wait commits in the same batch, one
-              that waits stays under no dim until it is above it (no
-              brightness jump at the teleport). Same position in the tree
-              while it fades out, so it is not remounted. */}
+          {/* Mounted while a slot owns the host, shown while it is lifted:
+              a lift without a keyboard wait commits in the same batch, one
+              that waits stays under no dim until it is above it, and a drop
+              commits once the dim has faded out (no brightness jump either
+              way). Immediate drops take it away at once. */}
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {backdrop && (
+            {active && (
               <Backdrop
-                render={backdrop.renderBackdrop}
+                render={active.renderBackdrop}
                 visible={shown.phase === 'lifted'}
               />
             )}
@@ -204,7 +179,8 @@ export type LiftSlotProps = {
   // the host.
   dropTiming?: WithTimingConfig;
   renderBackdrop?: (state: { visible: boolean }) => ReactNode;
-  // How long the backdrop stays mounted after the drop to fade out (ms).
+  // The backdrop's fade-out (ms): a drop does not put the view back under
+  // it before then. It runs alongside the drop animation.
   backdropFade?: number;
   ref?: Ref<SlotHandle>;
 };
@@ -216,7 +192,6 @@ export type SlotHandle = {
   // (a repeat, or a lift mid-drop); false: rejected.
   lift(): 'new' | 'repeat' | false;
   renderBackdrop(state: { visible: boolean }): ReactNode;
-  backdropFade(): number;
   // restoreFocus: false skips AC-E6's restore for this drop (a menu item
   // that navigates).
   drop(opts?: { immediate?: boolean; restoreFocus?: boolean }): void;
@@ -267,6 +242,8 @@ export function LiftSlot({
   const focused = useRef<HostInstance | null>(null);
   // The current drop's restoreFocus option.
   const dropFocus = useRef(true);
+  // When the current drop's backdrop fade-out ends (Date.now() ms).
+  const fadeEnd = useRef(0);
   const mounted = useRef(true);
   // Read through refs: the once-created api closure calls restore/start.
   const latest = useRef({
@@ -359,6 +336,16 @@ export function LiftSlot({
     // First sample still at the lift position: nothing moved, commit now.
     const unmoved = prev === undefined && near(here, ORIGIN);
     if (near(t, here) && (still || unmoved)) {
+      // The backdrop fades out from the drop on; back under it only once
+      // it is gone (a frame after its duration), then re-check the spot.
+      const wait = fadeEnd.current - Date.now();
+      if (wait > 0) {
+        setTimeout(
+          () => requestAnimationFrame(() => settle(token, from, t)),
+          wait
+        );
+        return;
+      }
       commit(null);
       return;
     }
@@ -420,7 +407,6 @@ export function LiftSlot({
   // context functions, so first-render closures stay correct.
   api.current ??= {
     renderBackdrop: (state) => latest.current.renderBackdrop?.(state) ?? null,
-    backdropFade: () => latest.current.backdropFade ?? 0,
     lift() {
       if (!owns(send({ type: 'lift', slot: me() }), me())) {
         return false;
@@ -517,6 +503,7 @@ export function LiftSlot({
         commit(null);
         return;
       }
+      fadeEnd.current = Date.now() + (latest.current.backdropFade ?? 0);
       settle(token, from);
     },
   };
