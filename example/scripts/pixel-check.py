@@ -288,9 +288,9 @@ def self_test():
     assert any('kind=jump' in x for x in windows(small, [True] * 12, t, 1.0))
     ramp = [(10.0, 10.0 + 0.5 * i * i) for i in range(12)]
     assert windows(ramp, [True] * 12, t, 1.0)[0].endswith('bad=0'), ramp
-    # P6 drop window: commit at frame 15, gate off after commit + 6 (frame
-    # 21); the restored keyboard moves the list 336dp 3 frames after the
-    # refocus (gate off + 2), past the 2 context frames.
+    # P6 drop window: commit at frame 15, last gated frame commit + 6 (21);
+    # the refocused keyboard moves the list 336dp at frame 26, past the 2
+    # context frames (22, 23).
     t30, c = [i / 60 for i in range(30)], 15
     p6 = [True] * (c + 7) + [False] * (30 - c - 7)
     kb = lambda pts: pts[:c + 11] + [(10.0, p[1] - 336) for p in pts[c + 11:]]

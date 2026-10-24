@@ -34,6 +34,7 @@ const HOLD = 12;
 // useLiftGesture's minDuration: the long press activates this long after its
 // onBegin, which starts the press scale.
 const MIN_DURATION = 400;
+const FRAME = 1000 / 60;
 type Auto = 'off' | 'one' | 'flood';
 const AUTOS: Auto[] = ['off', 'one', 'flood'];
 
@@ -235,12 +236,18 @@ const Message = memo(function MessageView({
         if (isTarget && ctx.current) {
           probe.mark('drop', ctx.current);
         }
-        const ended = Date.now() - dropAt.current;
-        // The drop window keeps 6 frames after the commit, then closes
-        // before the keyboard reopens and moves the list: the engine's
-        // restore (2 frames after the commit) is off here, and the
-        // screen refocuses once the closed gate is on screen.
-        await frames(6);
+        const now = Date.now();
+        const ended = now - dropAt.current;
+        // The drop window keeps at least 6 frames after the commit (on screen
+        // by the first frame after onLiftEnd), then closes before the
+        // keyboard reopens and moves the list: the engine's restore (2
+        // frames after the commit) is off here, and the screen refocuses
+        // once the closed gate is on screen. 8 rAFs, and as long in wall
+        // time: rAFs bunch up when the JS thread catches up.
+        await frames(8);
+        while (Date.now() - now < 8 * FRAME) {
+          await frames(1);
+        }
         gate.value = 0;
         const closed = Date.now() - dropAt.current;
         await frames(2);
