@@ -15,6 +15,8 @@ export const defaultMotion = {
   drop: { duration: 300 } as WithTimingConfig,
   // The default dim backdrop.
   backdrop: { opacity: 0.25, duration: 200 },
+  // Menu and accessory: fade and grow in once placed, fade out on drop.
+  menu: { scale: 0.9, duration: 200 },
 };
 
 export type Motion = typeof defaultMotion;
@@ -24,6 +26,7 @@ export type MotionOverride = {
   release?: WithSpringConfig;
   drop?: WithTimingConfig;
   backdrop?: Partial<Motion['backdrop']>;
+  menu?: Partial<Motion['menu']>;
 };
 
 // Override keys left undefined keep the default (withTiming would take an
@@ -43,5 +46,6 @@ export function mergeMotion(override?: MotionOverride): Motion {
     release: override.release ?? defaultMotion.release,
     drop: over(defaultMotion.drop, override.drop),
     backdrop: over(defaultMotion.backdrop, override.backdrop),
+    menu: over(defaultMotion.menu, override.menu),
   };
 }

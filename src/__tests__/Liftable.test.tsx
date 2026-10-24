@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { useEffect } from 'react';
-import { AppState, Dimensions, Keyboard, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  AppState,
+  Dimensions,
+  Keyboard,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { computeLayout } from '../engine/computeLayout';
 import { LiftProvider } from '../LiftProvider';
 import { Liftable, type LiftableProps } from '../Liftable';
 import type { LiftHandle } from '../types';
@@ -66,6 +76,13 @@ jest.mock('../engine/measure', () => ({
   isUsable: () => mockUsable,
 }));
 let mockUsable = true;
+// The real computeLayout, watched (AC-U3: what the chrome passes it).
+jest.mock('../engine/computeLayout', () => {
+  const actual = jest.requireActual<typeof import('../engine/computeLayout')>(
+    '../engine/computeLayout'
+  );
+  return { ...actual, computeLayout: jest.fn(actual.computeLayout) };
+});
 
 const layout = {
   nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 60 } },
@@ -119,6 +136,7 @@ beforeEach(() => {
   mockGestures.length = 0;
   mockAnimations.length = 0;
   mounts = 0;
+  (computeLayout as jest.Mock).mockClear();
 });
 
 afterEach(() => {
@@ -428,4 +446,311 @@ test('a lift that fails at once (no layout yet) leaves no backdrop', async () =>
   await act(() => mockGestures[0]!.onLift());
   expect(screen.queryByTestId('custom-backdrop')).toBeNull();
   expect(screen.queryByTestId('lift-backdrop')).toBeNull();
+});
+
+// Step 3.2: menu, accessory, callbacks, accessibility.
+
+const menuItems = (log: string[] = []) => [
+  { key: 'copy', title: 'Copy', onPress: () => log.push('copy') },
+  {
+    key: 'delete',
+    title: 'Delete',
+    destructive: true,
+    onPress: () => log.push('delete'),
+  },
+];
+
+// The menu/accessory wrappers measure their content before they are placed.
+async function placeChrome(menu = { width: 250, height: 88 }) {
+  for (const [id, size] of [
+    ['lift-menu', menu],
+    ['lift-accessory', { width: 200, height: 40 }],
+  ] as const) {
+    const el = screen.queryByTestId(id);
+    if (el) {
+      await fireEvent(el, 'layout', {
+        nativeEvent: { layout: { x: 0, y: 0, ...size } },
+      });
+    }
+  }
+}
+
+const styleOf = (el: { props: { style?: unknown } }) =>
+  StyleSheet.flatten(el.props.style as never) as Record<string, unknown>;
+
+test('U1: the default menu lists the items, destructive in its own style', async () => {
+  await render(app({ menu: menuItems() }));
+  await longPress();
+  expect(screen.getByTestId('lift-menu-default')).toBeTruthy();
+  expect(styleOf(screen.getByText('Delete')).color).toBe('#FF3B30');
+  expect(styleOf(screen.getByText('Copy')).color).not.toBe(
+    styleOf(screen.getByText('Delete')).color
+  );
+});
+
+test('the menu is measured hidden, then placed and shown', async () => {
+  await render(app({ menu: menuItems() }));
+  await longPress();
+  const hidden = screen.getByTestId('lift-menu');
+  expect(styleOf(hidden).opacity).toBe(0);
+  expect(hidden.props.pointerEvents).toBe('none');
+  expect(mockAnimations.some((a) => a.to === 1 && a.kind === 'timing')).toBe(
+    false
+  );
+  await placeChrome();
+  const placed = screen.getByTestId('lift-menu');
+  // Below the view (host-local 0..60) plus the gap.
+  expect(styleOf(placed)).toMatchObject({ left: 0, top: 68 });
+  expect(styleOf(placed).opacity).toBeUndefined();
+  // Appear fades it in.
+  expect(mockAnimations.some((a) => a.to === 1 && a.kind === 'timing')).toBe(
+    true
+  );
+});
+
+test('no menu and no accessory: nothing to lay out', async () => {
+  await render(app());
+  await longPress();
+  expect(screen.queryByTestId('lift-menu')).toBeNull();
+  expect(screen.queryByTestId('lift-accessory')).toBeNull();
+  expect(computeLayout).not.toHaveBeenCalled();
+});
+
+test('U2: renderMenu replaces the default menu; its close() drops', async () => {
+  jest.useFakeTimers();
+  const onLiftEnd = jest.fn();
+  await render(
+    app({
+      menu: menuItems(),
+      onLiftEnd,
+      renderMenu: (items, close) => (
+        <Pressable testID="custom-menu" onPress={() => close()}>
+          <Text>{items.map((i) => i.title).join(',')}</Text>
+        </Pressable>
+      ),
+    })
+  );
+  await longPress();
+  await placeChrome();
+  expect(screen.queryByTestId('lift-menu-default')).toBeNull();
+  expect(screen.getByText('Copy,Delete')).toBeTruthy();
+  await fireEvent.press(screen.getByTestId('custom-menu'));
+  await act(() => jest.advanceTimersByTime(200 + 16));
+  expect(onLiftEnd).toHaveBeenCalledTimes(1);
+  expect(screen.queryByTestId('custom-menu')).toBeNull();
+});
+
+test.each(['top', 'bottom'] as const)(
+  'U3: renderAccessory renders on lift; accessoryPosition %s reaches computeLayout',
+  async (accessoryPosition) => {
+    await render(
+      app({
+        menu: menuItems(),
+        accessoryPosition,
+        renderAccessory: () => <Text>reactions</Text>,
+      })
+    );
+    expect(screen.queryByText('reactions')).toBeNull();
+    await longPress();
+    expect(screen.getByText('reactions')).toBeTruthy();
+    await placeChrome();
+    expect(computeLayout).toHaveBeenCalledTimes(1);
+    expect(computeLayout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessoryPosition,
+        accessorySize: { width: 200, height: 40 },
+        menuSize: { width: 250, height: 88 },
+      })
+    );
+  }
+);
+
+test('U3: the default accessory position is top', async () => {
+  await render(app({ renderAccessory: () => <Text>reactions</Text> }));
+  await longPress();
+  await placeChrome();
+  const { accessoryRect, viewRect } = (computeLayout as jest.Mock).mock
+    .results[0]!.value as ReturnType<typeof computeLayout>;
+  expect(accessoryRect!.y + accessoryRect!.height).toBeLessThanOrEqual(
+    viewRect.y
+  );
+});
+
+test('U4: onLiftStart then onLiftEnd, once each', async () => {
+  jest.useFakeTimers();
+  const calls: string[] = [];
+  const ref = { current: null as LiftHandle | null };
+  await render(
+    app({
+      ref,
+      onLiftStart: () => calls.push('start'),
+      onLiftEnd: () => calls.push('end'),
+    })
+  );
+  await longPress();
+  await act(() => ref.current!.drop());
+  await act(() => jest.advanceTimersByTime(200 + 16));
+  expect(calls).toEqual(['start', 'end']);
+});
+
+test('U4: disabled: no long press, ref.lift() does nothing', async () => {
+  const ref = { current: null as LiftHandle | null };
+  const onLiftStart = jest.fn();
+  await render(app({ ref, disabled: true, onLiftStart, menu: menuItems() }));
+  expect((mockGestures[0] as unknown as { enabled: boolean }).enabled).toBe(
+    false
+  );
+  await fireEvent(
+    screen.getByTestId('content').parent!.parent!,
+    'layout',
+    layout
+  );
+  await act(() => ref.current!.lift());
+  expect(onLiftStart).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('lift-backdrop')).toBeNull();
+  // No lift alternative either.
+  expect(
+    screen.getByTestId('content').parent!.parent!.props.accessibilityActions
+  ).toBeUndefined();
+});
+
+test('E2: a menu item runs, then drops, then onLiftEnd', async () => {
+  jest.useFakeTimers();
+  const log: string[] = [];
+  await render(app({ menu: menuItems(log), onLiftEnd: () => log.push('end') }));
+  await longPress();
+  await placeChrome();
+  await fireEvent.press(screen.getByTestId('lift-menu-item-delete'));
+  expect(log).toEqual(['delete']);
+  // The menu fades out with the dim; the view goes back after.
+  expect(mockAnimations.some((a) => a.to === 0 && a.kind === 'timing')).toBe(
+    true
+  );
+  await act(() => jest.advanceTimersByTime(200 + 16));
+  expect(log).toEqual(['delete', 'end']);
+  expect(screen.queryByTestId('lift-menu')).toBeNull();
+});
+
+test('E6: an item with restoreFocus false skips the focus restore', async () => {
+  jest.useFakeTimers();
+  const input = {};
+  const focus = jest
+    .spyOn(TextInput.State, 'focusTextInput')
+    .mockImplementation(() => {});
+  const current = jest
+    .spyOn(TextInput.State, 'currentlyFocusedInput')
+    .mockReturnValue(input as never);
+  const { listeners } = openKeyboard();
+  const items = [
+    { key: 'go', title: 'Go', restoreFocus: false, onPress: () => {} },
+    { key: 'stay', title: 'Stay', onPress: () => {} },
+  ];
+  await render(app({ menu: items }));
+  for (const key of ['go', 'stay']) {
+    await longPress();
+    current.mockReturnValue(null as never);
+    await hideKeyboard(listeners);
+    await placeChrome();
+    await fireEvent.press(screen.getByTestId(`lift-menu-item-${key}`));
+    // The commit (fade + a frame), then the restore 2 frames after it.
+    await act(() => jest.advanceTimersByTime(200 + 16));
+    await act(() => jest.advanceTimersByTime(2 * 16));
+    current.mockReturnValue(input as never);
+  }
+  expect(focus).toHaveBeenCalledTimes(1);
+});
+
+test('E7: menu titles as accessibility actions, run without a lift or haptics', async () => {
+  const log: string[] = [];
+  const onLiftStart = jest.fn();
+  const haptics = jest.fn();
+  await render(app({ menu: menuItems(log), onLiftStart, haptics }));
+  const wrapper = screen.getByTestId('content').parent!.parent!;
+  expect(
+    wrapper.props.accessibilityActions.map((a: { name: string }) => a.name)
+  ).toEqual(['Copy', 'Delete']);
+  await fireEvent(wrapper, 'accessibilityAction', {
+    nativeEvent: { actionName: 'Delete' },
+  });
+  expect(log).toEqual(['delete']);
+  expect(onLiftStart).not.toHaveBeenCalled();
+  expect(haptics).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('lift-backdrop')).toBeNull();
+});
+
+test('a view too tall for the menu shrinks, and grows back before it drops', async () => {
+  jest.useFakeTimers();
+  // 60dp view, 88dp menu, 100dp screen: it scales to the 0.5 floor.
+  jest
+    .spyOn(Dimensions, 'get')
+    .mockReturnValue({ width: 300, height: 100 } as never);
+  const ref = { current: null as LiftHandle | null };
+  const onLiftEnd = jest.fn();
+  await render(app({ ref, menu: menuItems(), onLiftEnd }));
+  await longPress();
+  await placeChrome();
+  expect(mockAnimations.some((a) => a.to === 0.5)).toBe(true);
+  mockAnimations.length = 0;
+  await act(() => ref.current!.drop());
+  expect(mockAnimations.some((a) => a.to === 1)).toBe(true);
+  // The scale back (300ms) outlasts the fade (200ms).
+  await act(() => jest.advanceTimersByTime(250));
+  expect(onLiftEnd).not.toHaveBeenCalled();
+  await act(() => jest.advanceTimersByTime(50 + 4 * 16));
+  expect(onLiftEnd).toHaveBeenCalledTimes(1);
+});
+
+test('a second tap on an item during the fade-out does not run it again', async () => {
+  jest.useFakeTimers();
+  const log: string[] = [];
+  await render(app({ menu: menuItems(log) }));
+  await longPress();
+  await placeChrome();
+  await fireEvent.press(screen.getByTestId('lift-menu-item-delete'));
+  expect(screen.getByTestId('lift-menu').props.pointerEvents).toBe('none');
+  await fireEvent.press(screen.getByTestId('lift-menu-item-delete'));
+  expect(log).toEqual(['delete']);
+});
+
+test('no menu: the drop waits for the backdrop fade only', async () => {
+  jest.useFakeTimers();
+  const ref = { current: null as LiftHandle | null };
+  const onLiftEnd = jest.fn();
+  await render(
+    app({ ref, onLiftEnd, motion: { backdrop: { duration: 100 } } })
+  );
+  await longPress();
+  await act(() => ref.current!.drop());
+  await act(() => jest.advanceTimersByTime(100 + 16));
+  expect(onLiftEnd).toHaveBeenCalledTimes(1);
+});
+
+test('menu items that change while lifted show up', async () => {
+  // Only the row re-renders (its own state), not the provider.
+  let setTitle: (t: string) => void = () => {};
+  function StatefulRow() {
+    const [title, set] = useState('Before');
+    setTitle = set;
+    return <Row menu={[{ key: 'k', title, onPress: () => {} }]} />;
+  }
+  await render(
+    <LiftProvider>
+      <StatefulRow />
+    </LiftProvider>
+  );
+  await longPress();
+  await placeChrome();
+  expect(screen.getByText('Before')).toBeTruthy();
+  await act(() => setTitle('After'));
+  expect(screen.getByText('After')).toBeTruthy();
+  expect(screen.queryByText('Before')).toBeNull();
+});
+
+test('accessible: a menu makes the view one element, unless overridden', async () => {
+  const wrapper = () => screen.getByTestId('content').parent!.parent!;
+  const view = await render(app({ menu: menuItems() }));
+  expect(wrapper().props.accessible).toBe(true);
+  await view.rerender(app({ menu: menuItems(), accessible: false }));
+  expect(wrapper().props.accessible).toBe(false);
+  expect(wrapper().props.accessibilityActions).toHaveLength(2);
 });

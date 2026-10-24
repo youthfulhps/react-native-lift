@@ -5,6 +5,7 @@ import { LiftProvider } from 'react-native-lift';
 import { FlatListScreen } from './poc/FlatListScreen';
 import { GesturesScreen } from './poc/GesturesScreen';
 import { KeyboardChatScreen } from './poc/KeyboardChatScreen';
+import { MenuScreen } from './poc/MenuScreen';
 import { ScrollConflictScreen } from './poc/ScrollConflictScreen';
 import { SystemScreen } from './poc/SystemScreen';
 import { VideoScreen } from './poc/VideoScreen';
@@ -17,14 +18,20 @@ const SCREENS = {
   video: VideoScreen,
   scroll: ScrollConflictScreen,
   system: SystemScreen,
+  menu: MenuScreen,
 };
+
+// The menu stays inside these (iPhone 15 Pro-ish; the tabs below sit under
+// the status bar the same way). ponytail: fixed, use safe-area-context's
+// insets once the example depends on it.
+const INSETS = { top: 54, bottom: 34, left: 0, right: 0 };
 
 export default function App() {
   const [screen, setScreen] = useState<keyof typeof SCREENS>('harness');
   const Screen = SCREENS[screen];
   return (
     <GestureHandlerRootView style={styles.root}>
-      <LiftProvider>
+      <LiftProvider insets={INSETS}>
         <View style={styles.tabs}>
           {(Object.keys(SCREENS) as (keyof typeof SCREENS)[]).map((key) => (
             <Pressable

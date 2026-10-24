@@ -1,0 +1,63 @@
+# Step 3.2 smoke: menu below/above, accessory top/bottom, a view that shrinks,
+# menu item, reaction and outside tap each drop. screenshots land in the working directory.
+# Rows are found by text: with a menu the Liftable is one accessibility
+# element (AC-E7), so inner testIDs are not in the tree.
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-menu
+- longPressOn: "row a"
+- extendedWaitUntil:
+    visible: Copy
+    timeout: 5000
+- takeScreenshot: menu-1-menu-below
+- tapOn: Copy
+- extendedWaitUntil:
+    visible: "last:copy a"
+    timeout: 5000
+- longPressOn: "row top"
+- extendedWaitUntil:
+    visible:
+      id: reaction-👍
+    timeout: 5000
+- takeScreenshot: menu-2-accessory-top
+- tapOn:
+    id: reaction-👍
+- extendedWaitUntil:
+    visible: "last:👍 top"
+    timeout: 5000
+- longPressOn: "row tall"
+- extendedWaitUntil:
+    visible: Delete
+    timeout: 5000
+- takeScreenshot: menu-3-tall-shrinks
+- tapOn: Delete
+- extendedWaitUntil:
+    visible: "last:delete tall"
+    timeout: 5000
+- scrollUntilVisible:
+    element: "row bottom"
+    direction: DOWN
+- longPressOn: "row b"
+- extendedWaitUntil:
+    visible: Reply
+    timeout: 5000
+- takeScreenshot: menu-4-accessory-bottom
+- tapOn:
+    point: 85%,30%
+- extendedWaitUntil:
+    notVisible: Reply
+    timeout: 5000
+- longPressOn: "row bottom"
+- extendedWaitUntil:
+    visible: Reply
+    timeout: 5000
+- takeScreenshot: menu-5-menu-above
+- tapOn: Reply
+- extendedWaitUntil:
+    visible: "last:reply bottom"
+    timeout: 5000
