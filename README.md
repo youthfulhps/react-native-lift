@@ -23,16 +23,26 @@ npm install react-native-lift react-native-teleport react-native-reanimated reac
 
 With Expo, install the native peers with `npx expo install` so they match your SDK. react-native-teleport has native code, so use a development build, not Expo Go.
 
+The examples below also use [react-native-safe-area-context](https://github.com/appandflow/react-native-safe-area-context) for the safe area insets (optional).
+
 ## Usage
 
 Wrap the app once, inside `GestureHandlerRootView`:
 
 ```tsx
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LiftProvider } from 'react-native-lift';
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <Root />
+    </SafeAreaProvider>
+  );
+}
+
+function Root() {
   const insets = useSafeAreaInsets();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -72,7 +82,7 @@ function Messages({ messages }) {
 ```
 
 - A long press lifts the view. The menu opens next to it. Tapping an item, or anywhere outside the view, drops it back.
-- `useLiftScrollLock()` returns `false` while any view is lifted. Pass it to `scrollEnabled` so the list cannot scroll away under the lifted view.
+- `useLiftScrollLock()` returns `false` from the long press until the view is back in place. Pass it to `scrollEnabled` so the list cannot scroll away under the lifted view.
 
 ### Where to put `LiftProvider`
 
@@ -182,9 +192,10 @@ A screen that stays mounted under a pushed screen keeps its lifted view. Drop it
 
 ```tsx
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback } from 'react';
+import { useCallback, type RefObject } from 'react';
+import type { LiftHandle } from 'react-native-lift';
 
-function useDropOnBlur(ref) {
+function useDropOnBlur(ref: RefObject<LiftHandle | null>) {
   useFocusEffect(useCallback(() => () => ref.current?.drop({ immediate: true }), [ref]));
 }
 ```
@@ -193,7 +204,7 @@ function useDropOnBlur(ref) {
 
 - **One lift at a time.** While a view is dropping (about 200–350 ms), lifting another view is ignored. In code, `a.drop(); b.lift()` back to back ignores `b.lift()`; lift `b` from `a`'s `onLiftEnd`.
 - **Keyboard:** lifting while the keyboard is open closes it first and lifts once it is gone, so the lift starts later than usual (about 0.6 s on iOS). The text field gets focus back after the drop (`restoreFocus`).
-- **Very tall views** shrink to fit next to the menu, down to half size. If still too tall, the side away from the menu is cut where it leaves the safe area. The cut part shows again as soon as the drop starts.
+- **Very tall views** shrink to fit next to the menu, down to half size. If still too tall, the side away from the menu is cut where it no longer fits: at the edge of the safe area, or at the accessory when the accessory is on that side. The cut part shows again as soon as the drop starts.
 - **`renderMenu` and `renderAccessory` render in the overlay** under `LiftProvider`. Hooks inside them see `LiftProvider`'s context, not the context around the `Liftable` (navigation, theme). Read those values in your component and close over them.
 - **Accessibility:** with a menu, the `Liftable` becomes one accessibility element, because iOS exposes actions only on accessible elements. `accessible={false}` turns that off, but then iOS does not expose the menu actions. Actions are named after the item titles. With two items of the same title, the first one runs.
 - Turning on `disabled` while the view is lifted does not drop it.

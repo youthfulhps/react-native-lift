@@ -766,8 +766,8 @@ export function LiftSlot({
             scaled ? (latest.current.moveTiming?.duration ?? 300) : 0
           );
       }
-      // The cut part lies outside the safe area here: shown again at once,
-      // so the view grows back whole.
+      // Shown whole again at once, as it grows back: the cut part is what
+      // did not fit next to the menu and accessory.
       setCut(NO_CUT);
       settle(token, from);
     },
@@ -883,6 +883,8 @@ export function LiftSlot({
       >
         <Animated.View
           collapsable={false}
+          // Cut: a tap on the hidden part reaches the backdrop and drops.
+          pointerEvents={clipped ? 'box-none' : undefined}
           style={[
             shown ? [styles.absolute, rectOf(shown)] : styles.fill,
             containerStyle,
@@ -913,7 +915,9 @@ const rectOf = ({ left, top, width, height }: Lifted) => ({
 const clipRect = ({ height }: Lifted, { top, bottom }: Cut) => ({
   overflow: 'hidden' as const,
   marginTop: top,
-  height: height - top - bottom,
+  // ponytail: 0 when the menu and accessory alone overflow the screen
+  // (computeLayout's ceiling); the view is then hidden, not resized.
+  height: Math.max(0, height - top - bottom),
 });
 
 const innerRect = ({ height }: Lifted, { top }: Cut) => ({

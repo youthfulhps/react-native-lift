@@ -709,10 +709,9 @@ test('a view too tall for the menu shrinks and is clipped, and grows back before
   // the visible bottom.
   const cut = StyleSheet.flatten(clip().props.style);
   expect(cut).toEqual({ overflow: 'hidden', marginTop: 0, height: 32 });
-  expect(StyleSheet.flatten(inner().props.style)).toEqual({
-    marginTop: -0,
-    height: 60,
-  });
+  const shifted = StyleSheet.flatten(inner().props.style);
+  expect(shifted.height).toBe(60);
+  expect(shifted.marginTop).toBeCloseTo(0);
   expect(r.viewRect.y + cut.height * r.scale).toBe(visibleBottom);
   // The edge moves with the view: a plain child of the scaled container,
   // nothing animates it, and it stays put in view units over the move.
@@ -720,6 +719,8 @@ test('a view too tall for the menu shrinks and is clipped, and grows back before
   expect(StyleSheet.flatten(container.props.style).transform).toEqual([
     { scale: 0.5 },
   ]);
+  // A tap on the hidden part falls through to the backdrop.
+  expect(container.props.pointerEvents).toBe('box-none');
   expect(mockAnimations.map((a) => a.to)).not.toContain(32);
   await act(() => jest.advanceTimersByTime(300 + 16));
   expect(StyleSheet.flatten(clip().props.style)).toEqual(cut);
@@ -733,6 +734,68 @@ test('a view too tall for the menu shrinks and is clipped, and grows back before
   expect(onLiftEnd).not.toHaveBeenCalled();
   await act(() => jest.advanceTimersByTime(50 + 4 * 16));
   expect(onLiftEnd).toHaveBeenCalledTimes(1);
+});
+
+test('menu below: the top is cut, the view shifted up under the visible part', async () => {
+  // 60dp view at y 100, menu and gap 96dp below it; the safe area starts at
+  // 144 and ends at 256: 16dp of room, so 14dp of the 30dp (0.5) view are cut.
+  jest
+    .spyOn(Dimensions, 'get')
+    .mockReturnValue({ width: 300, height: 263 } as never);
+  await render(
+    <LiftProvider insets={{ top: 144, bottom: 7, left: 0, right: 0 }}>
+      <Row menu={menuItems()} />
+    </LiftProvider>
+  );
+  await longPress();
+  await placeChrome();
+  const r = jest.mocked(computeLayout).mock.results.at(-1)!.value as ReturnType<
+    typeof computeLayout
+  >;
+  expect(r.clip).toEqual({ side: 'top', amount: 14 });
+  // 14 / 0.5 = 28 cut off the top, in the view's units.
+  const content = screen.getByTestId('content');
+  expect(StyleSheet.flatten(content.parent!.parent!.props.style)).toEqual({
+    overflow: 'hidden',
+    marginTop: 28,
+    height: 32,
+  });
+  expect(StyleSheet.flatten(content.parent!.props.style)).toEqual({
+    marginTop: -28,
+    height: 60,
+  });
+  // Scaled, the visible part starts at the safe area's top.
+  expect(r.viewRect.y + 28 * r.scale).toBe(144);
+});
+
+test('the cut comes back with a lift during the drop, and never outlives the lift', async () => {
+  jest.useFakeTimers();
+  jest
+    .spyOn(Dimensions, 'get')
+    .mockReturnValue({ width: 300, height: 119 } as never);
+  const ref = { current: null as LiftHandle | null };
+  await render(
+    <LiftProvider insets={{ top: 0, bottom: 7, left: 0, right: 0 }}>
+      <Row ref={ref} menu={menuItems()} />
+    </LiftProvider>
+  );
+  const overflow = () =>
+    StyleSheet.flatten(
+      screen.getByTestId('content').parent!.parent!.props.style
+    ).overflow;
+  await longPress();
+  await placeChrome();
+  expect(overflow()).toBe('hidden');
+  // Lifted again mid drop: back to its arranged place, cut again.
+  await act(() => ref.current!.drop());
+  expect(overflow()).toBeUndefined();
+  await act(() => ref.current!.lift());
+  expect(overflow()).toBe('hidden');
+  // An immediate drop clears it: the next lift starts uncut.
+  await act(() => ref.current!.drop({ immediate: true }));
+  await act(() => jest.advanceTimersByTime(16));
+  await longPress();
+  expect(overflow()).toBeUndefined();
 });
 
 test('a second tap on an item during the fade-out does not run it again', async () => {
