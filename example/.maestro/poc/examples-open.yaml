@@ -11,7 +11,7 @@ appId: lift.example
     id: tab-ex
 - tapOn:
     id: ex-chat
-- longPressOn: "Hi 39"
+- longPressOn: "Message 40, a longer one that wraps"
 - extendedWaitUntil:
     visible: Reply
     timeout: 5000

@@ -1,0 +1,26 @@
+# Smoke (Step 4.2, AC-C3): lift, pick a menu item, the view drops back.
+# Debug: the dev client is already on the example. Release: LAUNCH=1.
+# The row is found by text: with a menu the Liftable is one accessibility
+# element (AC-E7).
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: poc/_launch.yaml
+- tapOn:
+    id: tab-ex
+- tapOn:
+    id: ex-menu
+- longPressOn: "row a"
+- extendedWaitUntil:
+    visible: Copy
+    timeout: 5000
+- tapOn: Copy
+# The item ran, and the menu is gone with the drop.
+- extendedWaitUntil:
+    visible: "last:copy a"
+    timeout: 5000
+- extendedWaitUntil:
+    notVisible: Copy
+    timeout: 5000
