@@ -466,7 +466,8 @@ async function placeChrome(menu = { width: 250, height: 88 }) {
     ['lift-menu', menu],
     ['lift-accessory', { width: 200, height: 40 }],
   ] as const) {
-    const el = screen.queryByTestId(id);
+    // Hidden from screen readers until placed.
+    const el = screen.queryByTestId(id, { includeHiddenElements: true });
     if (el) {
       await fireEvent(el, 'layout', {
         nativeEvent: { layout: { x: 0, y: 0, ...size } },
@@ -481,6 +482,7 @@ const styleOf = (el: { props: { style?: unknown } }) =>
 test('U1: the default menu lists the items, destructive in its own style', async () => {
   await render(app({ menu: menuItems() }));
   await longPress();
+  await placeChrome();
   expect(screen.getByTestId('lift-menu-default')).toBeTruthy();
   expect(styleOf(screen.getByText('Delete')).color).toBe('#FF3B30');
   expect(styleOf(screen.getByText('Copy')).color).not.toBe(
@@ -491,7 +493,10 @@ test('U1: the default menu lists the items, destructive in its own style', async
 test('the menu is measured hidden, then placed and shown', async () => {
   await render(app({ menu: menuItems() }));
   await longPress();
-  const hidden = screen.getByTestId('lift-menu');
+  const hidden = screen.getByTestId('lift-menu', {
+    includeHiddenElements: true,
+  });
+  expect(hidden.props.accessibilityElementsHidden).toBe(true);
   expect(styleOf(hidden).opacity).toBe(0);
   expect(hidden.props.pointerEvents).toBe('none');
   expect(mockAnimations.some((a) => a.to === 1 && a.kind === 'timing')).toBe(
@@ -552,7 +557,9 @@ test.each(['top', 'bottom'] as const)(
     );
     expect(screen.queryByText('reactions')).toBeNull();
     await longPress();
-    expect(screen.getByText('reactions')).toBeTruthy();
+    expect(
+      screen.getByText('reactions', { includeHiddenElements: true })
+    ).toBeTruthy();
     await placeChrome();
     expect(computeLayout).toHaveBeenCalledTimes(1);
     expect(computeLayout).toHaveBeenCalledWith(
@@ -707,8 +714,13 @@ test('a second tap on an item during the fade-out does not run it again', async 
   await longPress();
   await placeChrome();
   await fireEvent.press(screen.getByTestId('lift-menu-item-delete'));
-  expect(screen.getByTestId('lift-menu').props.pointerEvents).toBe('none');
-  await fireEvent.press(screen.getByTestId('lift-menu-item-delete'));
+  // Untouchable and out of the accessibility tree while it fades out.
+  const hidden = { includeHiddenElements: true };
+  const menu = screen.getByTestId('lift-menu', hidden);
+  expect(menu.props.pointerEvents).toBe('none');
+  expect(menu.props.accessibilityElementsHidden).toBe(true);
+  expect(screen.queryByTestId('lift-menu')).toBeNull();
+  await fireEvent.press(screen.getByTestId('lift-menu-item-delete', hidden));
   expect(log).toEqual(['delete']);
 });
 

@@ -267,6 +267,11 @@ function Chrome({
         // Untouchable until placed and again once the drop starts: a second
         // tap during the fade-out must not run an item twice.
         pointerEvents={rect && state.visible ? 'box-none' : 'none'}
+        // Nor reachable by a screen reader while hidden or fading out.
+        accessibilityElementsHidden={!state.visible}
+        importantForAccessibility={
+          state.visible ? 'auto' : 'no-hide-descendants'
+        }
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
           setSizes((cur) =>
