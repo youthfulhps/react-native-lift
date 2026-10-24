@@ -1,13 +1,14 @@
 # P6: long-press a message while the keyboard is open. env AUTO = off | one
 # | flood (messages arriving while lifted), ROUNDS, KB = 1 (default) | 0
-# (keyboard closed: the input is never focused), RESTORE = 1 (default) | 0
-# (diagnosis: the screen skips its focus restore; each round refocuses the
-# input itself). The screen drops by itself 4.5s after the lift and, after
-# the drop window, gives focus back to the input.
+# (keyboard closed: the input is never focused), RESTORE = screen (default:
+# the screen gives focus back after the drop window) | lib (the library's
+# default restore; regression flow, no pixel judging) | off (diagnosis: no
+# restore, each round refocuses the input itself). The screen drops by
+# itself 4.5s after the lift; focus must come back to the input.
 appId: lift.example
 env:
   KB: ${KB || "1"}
-  RESTORE: ${RESTORE || "1"}
+  RESTORE: ${RESTORE || "screen"}
 ---
 - runFlow:
     when:
@@ -30,11 +31,17 @@ env:
 - assertVisible: "auto:${AUTO}"
 - runFlow:
     when:
-      true: ${RESTORE == "0"}
+      true: ${RESTORE != "screen"}
     commands:
       - tapOn:
           id: restore-toggle
-      - assertVisible: "restore:off"
+- runFlow:
+    when:
+      true: ${RESTORE == "off"}
+    commands:
+      - tapOn:
+          id: restore-toggle
+- assertVisible: "restore:${RESTORE}"
 # The input is pre-filled with "hello" (Maestro's iOS inputText hangs).
 - runFlow:
     when:
@@ -47,7 +54,7 @@ env:
     commands:
       - runFlow:
           when:
-            true: ${KB == "1" && RESTORE == "0"}
+            true: ${KB == "1" && RESTORE == "off"}
           commands:
             - tapOn:
                 id: chat-input
@@ -64,11 +71,11 @@ env:
           timeout: 1500
       - longPressOn:
           id: lift-target
-      # RESTORE=0: focus:no holds from the lift on, so wait for the lift
+      # RESTORE=off: focus:no holds from the lift on, so wait for the lift
       # itself before waiting for the drop.
       - runFlow:
           when:
-            true: ${RESTORE == "0"}
+            true: ${RESTORE == "off"}
           commands:
             - extendedWaitUntil:
                 visible:
@@ -79,7 +86,7 @@ env:
       - extendedWaitUntil:
           visible:
             id: chat-focus
-            text: '${KB == "1" && RESTORE == "1" ? "focus:yes" : "focus:no"}'
+            text: '${KB == "1" && RESTORE != "off" ? "focus:yes" : "focus:no"}'
           timeout: 10000
       - extendedWaitUntil:
           visible:

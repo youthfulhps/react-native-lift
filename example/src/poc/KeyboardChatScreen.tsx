@@ -37,6 +37,11 @@ const MIN_DURATION = 400;
 const FRAME = 1000 / 60;
 type Auto = 'off' | 'one' | 'flood';
 const AUTOS: Auto[] = ['off', 'one', 'flood'];
+// Who gives focus back after a drop: the screen after the drop window
+// (measurements), the library's default restore (its regression flow), or
+// nobody (Step 2.2 diagnosis).
+type Restore = 'screen' | 'lib' | 'off';
+const RESTORES: Restore[] = ['screen', 'lib', 'off'];
 
 let cycleNo = 0;
 
@@ -72,7 +77,7 @@ const Message = memo(function MessageView({
 }: {
   id: number;
   auto: Auto;
-  restore: boolean;
+  restore: Restore;
   dim: boolean;
   addMessages: (n: number) => void;
 }) {
@@ -188,8 +193,7 @@ const Message = memo(function MessageView({
     <Liftable
       ref={handle}
       scale={scale}
-      // The screen restores focus itself, after the drop window.
-      restoreFocus={false}
+      restoreFocus={restore === 'lib'}
       renderBackdrop={dim ? undefined : noBackdrop}
       onLiftStart={async () => {
         status.lifted = true;
@@ -237,37 +241,40 @@ const Message = memo(function MessageView({
           probe.mark('drop', ctx.current);
         }
         const now = Date.now();
-        const ended = now - dropAt.current;
+        const start = dropAt.current;
+        dropAt.current = 0;
+        const ended = now - start;
+        // From now on: the library's restore comes before the gate closes.
+        const focused = (async () => {
+          for (let i = 0; i < 80; i++) {
+            if (TextInput.State.currentlyFocusedInput()) {
+              return `${Date.now() - start}ms`;
+            }
+            await frames(1);
+          }
+          return '-';
+        })();
         // The drop window keeps at least 6 frames after the commit (on screen
         // by the first frame after onLiftEnd), then closes before the
         // keyboard reopens and moves the list: the engine's restore (2
-        // frames after the commit) is off here, and the screen refocuses
-        // once the closed gate is on screen. 8 rAFs, and as long in wall
+        // frames after the commit) is off here (but for 'lib'), and the
+        // screen refocuses once the closed gate is on screen. 8 rAFs, and as long in wall
         // time: rAFs bunch up when the JS thread catches up.
         await frames(8);
         while (Date.now() - now < 8 * FRAME) {
           await frames(1);
         }
         gate.value = 0;
-        const closed = Date.now() - dropAt.current;
+        const closed = Date.now() - start;
         await frames(2);
         const { input } = press.current;
-        if (restore && input) {
+        if (restore === 'screen' && input) {
           TextInput.State.focusTextInput(input);
         }
-        if (isTarget && dropAt.current) {
-          let focus = -1;
-          for (let i = 0; i < 60 && focus < 0; i++) {
-            if (TextInput.State.currentlyFocusedInput()) {
-              focus = Date.now() - dropAt.current;
-            } else {
-              await frames(1);
-            }
-          }
-          dropAt.current = 0;
+        if (isTarget && start) {
           console.log(
-            `P6 DROP auto=${auto} onLiftEnd=${ended}ms close=${closed}ms ` +
-              `focus=${focus < 0 ? '-' : `${focus}ms`}`
+            `P6 DROP auto=${auto} restore=${restore} onLiftEnd=${ended}ms ` +
+              `close=${closed}ms focus=${await focused}`
           );
         }
       }}
@@ -302,8 +309,7 @@ export function KeyboardChatScreen() {
   // Inverted: index 0 is the newest message, drawn at the bottom.
   const [ids, setIds] = useState(() => Array.from({ length: 30 }, (_, i) => i));
   const [auto, setAuto] = useState<Auto>('off');
-  // Diagnosis only (Step 2.2): off skips the focus restore after a drop.
-  const [restore, setRestore] = useState(true);
+  const [restore, setRestore] = useState<Restore>('screen');
   // Recording only (keyboard-path dim check): the default dim, off for measurements.
   const [dim, setDim] = useState(false);
   const scrollEnabled = useLiftScrollLock();
@@ -337,9 +343,13 @@ export function KeyboardChatScreen() {
         <Pressable
           testID="restore-toggle"
           style={styles.button}
-          onPress={() => setRestore((r) => !r)}
+          onPress={() =>
+            setRestore(
+              (r) => RESTORES[(RESTORES.indexOf(r) + 1) % RESTORES.length]!
+            )
+          }
         >
-          <Text>{`restore:${restore ? 'on' : 'off'}`}</Text>
+          <Text>{`restore:${restore}`}</Text>
         </Pressable>
         <Pressable
           testID="dim-toggle"
