@@ -2,10 +2,14 @@ import { useState } from 'react';
 import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LiftProvider } from 'react-native-lift';
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
+import { ExamplesScreen } from './examples/ExamplesScreen';
 import { FlatListScreen } from './poc/FlatListScreen';
 import { GesturesScreen } from './poc/GesturesScreen';
 import { KeyboardChatScreen } from './poc/KeyboardChatScreen';
-import { MenuScreen } from './poc/MenuScreen';
 import { ScrollConflictScreen } from './poc/ScrollConflictScreen';
 import { SystemScreen } from './poc/SystemScreen';
 import { VideoScreen } from './poc/VideoScreen';
@@ -18,20 +22,25 @@ const SCREENS = {
   video: VideoScreen,
   scroll: ScrollConflictScreen,
   system: SystemScreen,
-  menu: MenuScreen,
+  ex: ExamplesScreen,
 };
 
-// The menu stays inside these (iPhone 15 Pro-ish; the tabs below sit under
-// the status bar the same way). ponytail: fixed, use safe-area-context's
-// insets once the example depends on it.
-const INSETS = { top: 54, bottom: 34, left: 0, right: 0 };
-
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <Root />
+    </SafeAreaProvider>
+  );
+}
+
+function Root() {
+  // The menu and accessory stay inside the safe area.
+  const insets = useSafeAreaInsets();
   const [screen, setScreen] = useState<keyof typeof SCREENS>('harness');
   const Screen = SCREENS[screen];
   return (
     <GestureHandlerRootView style={styles.root}>
-      <LiftProvider insets={INSETS}>
+      <LiftProvider insets={insets}>
         <View style={styles.tabs}>
           {(Object.keys(SCREENS) as (keyof typeof SCREENS)[]).map((key) => (
             <Pressable

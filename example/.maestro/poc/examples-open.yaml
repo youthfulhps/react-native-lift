@@ -1,0 +1,73 @@
+# Step 4.1 Verify: each example screen opens, with one lift and drop on
+# each. Screenshots land in the working directory. Rows are found by text
+# (a Liftable with a menu is one accessibility element).
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-ex
+- tapOn:
+    id: ex-chat
+- longPressOn: "Hi 39"
+- extendedWaitUntil:
+    visible: Reply
+    timeout: 5000
+- takeScreenshot: ex-1-chat
+- tapOn: "👍"
+- extendedWaitUntil:
+    notVisible: Reply
+    timeout: 5000
+- tapOn:
+    id: ex-photos
+- waitForAnimationToEnd:
+    timeout: 3000
+- longPressOn:
+    point: 15%,20%
+- extendedWaitUntil:
+    visible: Share
+    timeout: 5000
+- takeScreenshot: ex-2-photos
+- tapOn: Like
+- extendedWaitUntil:
+    notVisible: Share
+    timeout: 5000
+- tapOn:
+    id: ex-videos
+- longPressOn:
+    point: 50%,25%
+- extendedWaitUntil:
+    visible: Save
+    timeout: 5000
+- takeScreenshot: ex-3-videos
+- tapOn: Save
+- extendedWaitUntil:
+    notVisible: Save
+    timeout: 5000
+- tapOn:
+    id: ex-compare
+- longPressOn:
+    point: 50%,30%
+- extendedWaitUntil:
+    visible: Close
+    timeout: 5000
+- takeScreenshot: ex-4-compare-teleport
+- tapOn: Close
+- extendedWaitUntil:
+    notVisible: Close
+    timeout: 5000
+- tapOn:
+    id: compare-mode
+- assertVisible: "mode: clone (tap to switch)"
+- longPressOn:
+    point: 50%,30%
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: ex-5-compare-clone
+# Close the copy, back to teleport.
+- tapOn:
+    point: 50%,90%
+- tapOn:
+    id: compare-mode

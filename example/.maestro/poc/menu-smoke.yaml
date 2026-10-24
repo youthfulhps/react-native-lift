@@ -9,7 +9,9 @@ appId: lift.example
       true: ${LAUNCH == "1"}
     file: _launch.yaml
 - tapOn:
-    id: tab-menu
+    id: tab-ex
+- tapOn:
+    id: ex-menu
 - longPressOn: "row a"
 - extendedWaitUntil:
     visible: Copy
