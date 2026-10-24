@@ -8,8 +8,8 @@ import Animated, {
 import type { Motion } from './motion';
 
 export type BackdropState = {
-  // True from the long press activating (before the view is lifted, e.g.
-  // while the keyboard closes) until the drop starts.
+  // True while the view is lifted (from the teleport, after any keyboard
+  // wait) until the drop starts.
   visible: boolean;
 };
 

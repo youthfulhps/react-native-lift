@@ -69,9 +69,8 @@ export function Liftable({
     press: motion.press,
     release: motion.release,
     onLift: () => {
-      // Accepted: feedback now, with the backdrop, even if the teleport
-      // waits for the keyboard. Rejected (another view is lifted, no layout
-      // yet): undo the press.
+      // Accepted: haptics now, even if the teleport waits for the keyboard.
+      // Rejected (another view is lifted, no layout yet): undo the press.
       const lifted = slot.current?.lift();
       if (lifted === 'new') {
         haptics?.();

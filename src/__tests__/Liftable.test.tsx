@@ -295,6 +295,7 @@ test('dim start: at once without a keyboard, at the teleport with one', async ()
 });
 
 test('the default dim fades to 0 over its duration on a drop', async () => {
+  jest.useFakeTimers();
   const ref = { current: null as LiftHandle | null };
   await render(app({ ref, motion: { backdrop: { duration: 180 } } }));
   await longPress();
@@ -306,6 +307,42 @@ test('the default dim fades to 0 over its duration on a drop', async () => {
     to: 0,
     config: { duration: 180 },
   });
+});
+
+test('a second drop() during the fade wait does not push the commit back', async () => {
+  jest.useFakeTimers();
+  const ref = { current: null as LiftHandle | null };
+  const onLiftEnd = jest.fn();
+  await render(
+    app({ ref, onLiftEnd, motion: { backdrop: { duration: 200 } } })
+  );
+  await longPress();
+  await act(() => ref.current!.drop());
+  await act(() => jest.advanceTimersByTime(150));
+  await act(() => ref.current!.drop());
+  await act(() => jest.advanceTimersByTime(50 + 16));
+  expect(onLiftEnd).toHaveBeenCalledTimes(1);
+});
+
+test('lift() and drop() in one batch: nothing renders, nothing waits', async () => {
+  jest.useFakeTimers();
+  const ref = { current: null as LiftHandle | null };
+  const onLiftStart = jest.fn();
+  await render(
+    app({ ref, onLiftStart, renderBackdrop: (s) => <Probe {...s} /> })
+  );
+  await fireEvent(
+    screen.getByTestId('content').parent!.parent!,
+    'layout',
+    layout
+  );
+  await act(() => {
+    ref.current!.lift();
+    ref.current!.drop();
+  });
+  expect(onLiftStart).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('custom-backdrop')).toBeNull();
+  expect(screen.queryByTestId('lift-backdrop')).toBeNull();
 });
 
 // Drops with no animation do not wait for the fade: the view goes back

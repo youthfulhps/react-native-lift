@@ -225,8 +225,8 @@ export function LiftSlot({
   const [lifted, setLifted] = useState<Lifted | null>(null);
   // Latest requested state, updated synchronously, so same-tick lift()/drop()
   // calls see each other instead of the last render's `lifted`. lift() then
-  // drop() ends dropped; drop() then lift() of an unmoved view also ends
-  // dropped (the re-lift is rejected until the drop has rendered).
+  // drop() ends dropped (nothing renders); a lift() during a drop cancels it
+  // (repeat).
   const liftedRef = useRef<Lifted | null>(null);
   // Bumped by every lift()/drop(); a pending lift/drop continues only if current.
   const dropToken = useRef(0);
@@ -493,17 +493,24 @@ export function LiftSlot({
       const from = liftedRef.current;
       const token = ++dropToken.current;
       dropFocus.current = focus;
+      // The fade starts on lifted -> dropping only; a second drop() does not
+      // push the commit back.
+      const fading = phase() === 'lifted';
       // measuring -> idle at once (backdrop, scroll lock); lifted -> dropping.
       send({ type: 'drop', slot: me() });
       if (!from) {
         // A pending (keyboard-wait) lift sees the new token and gives up.
         return;
       }
-      if (immediate) {
+      // Never rendered (lift() and drop() in one batch): nothing showed, so
+      // nothing to wait for.
+      if (immediate || !wasLifted.current) {
         commit(null);
         return;
       }
-      fadeEnd.current = Date.now() + (latest.current.backdropFade ?? 0);
+      if (fading) {
+        fadeEnd.current = Date.now() + (latest.current.backdropFade ?? 0);
+      }
       settle(token, from);
     },
   };
