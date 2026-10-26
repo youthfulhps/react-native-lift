@@ -16,6 +16,8 @@ export type LayoutInput = {
   screen: Size;
   minScale?: number;
   gap?: number;
+  /** Least distance from the safe region's left and right sides. */
+  edgeMargin?: number;
 };
 
 export type LayoutResult = {
@@ -40,6 +42,7 @@ export function computeLayout({
   screen,
   minScale = 0.5,
   gap = 8,
+  edgeMargin = 8,
 }: LayoutInput): LayoutResult {
   const top = safeArea.top;
   const bottom = screen.height - safeArea.bottom;
@@ -87,8 +90,13 @@ export function computeLayout({
     height,
   };
 
-  // 5. Menu/accessory start at the view's left edge, with x clamped into the safe region.
-  const placeX = (w: number) => clamp(viewRect.x, left, right - w);
+  // 5. Menu/accessory line up with the view's left edge, or with its right
+  // edge when that does not fit; never closer than edgeMargin to the sides.
+  const placeX = (w: number) => {
+    const fitsLeft = viewRect.x + w <= right - edgeMargin;
+    const x = fitsLeft ? viewRect.x : viewRect.x + viewRect.width - w;
+    return clamp(x, left + edgeMargin, right - edgeMargin - w);
+  };
 
   return {
     viewRect,

@@ -111,4 +111,46 @@ describe('computeLayout', () => {
     expect(r.clip).toBeUndefined();
     expectInsideSafe(r.menuRect);
   });
+
+  describe('horizontal: left edge, else right edge, edgeMargin from the sides', () => {
+    const margin = 8;
+
+    it("lines up with the view's left edge when the menu fits there", () => {
+      const r = layout({ viewRect: { x: 20, y: 300, width: 100, height: 80 } });
+
+      expect(r.menuRect.x).toBe(20);
+    });
+
+    it("lines up with the view's right edge when the left edge leaves no room", () => {
+      // A right-aligned bubble: 230 + 200 overflows 400 - 8.
+      const viewRect = { x: 230, y: 300, width: 150, height: 80 };
+      const r = layout({ viewRect, accessorySize });
+
+      expect(r.menuRect.x + r.menuRect.width).toBe(380);
+      expect(r.accessoryRect!.x + r.accessoryRect!.width).toBe(380);
+    });
+
+    it('keeps edgeMargin from a side the view touches', () => {
+      const full = layout({
+        viewRect: { x: 0, y: 300, width: 400, height: 80 },
+      });
+      const right = layout({
+        viewRect: { x: 300, y: 300, width: 100, height: 80 },
+      });
+
+      expect(full.menuRect.x).toBe(margin);
+      expect(right.menuRect.x + right.menuRect.width).toBe(
+        screen.width - margin
+      );
+    });
+
+    it('measures edgeMargin from the safe area, not the screen', () => {
+      const r = layout({
+        viewRect: { x: 0, y: 300, width: 400, height: 80 },
+        safeArea: { ...safeArea, left: 44, right: 44 },
+      });
+
+      expect(r.menuRect.x).toBe(44 + margin);
+    });
+  });
 });
