@@ -1,10 +1,16 @@
-import { Dimensions, type HostInstance } from 'react-native';
+import { Dimensions } from 'react-native';
 
 export type Rect = { x: number; y: number; width: number; height: number };
 
-// Synchronous window rect from the shadow tree, transforms included (RN 0.86+).
+// What is measured: a host view's instance. Structural, so the published
+// types do not name `HostInstance`, which older supported RN types lack.
+export type HostView = { getBoundingClientRect(): Rect };
+
+// Synchronous window rect from the shadow tree, transforms included. Host
+// instances expose it by default from RN 0.82 (enableAccessToHostTreeInFabric),
+// which sets the supported floor.
 export const windowRect = (
-  view: HostInstance | null | undefined
+  view: HostView | null | undefined
 ): Rect | undefined => view?.getBoundingClientRect();
 
 // False when the view is gone (0x0) or entirely off screen: there is nowhere

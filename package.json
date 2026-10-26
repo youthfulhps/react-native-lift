@@ -80,11 +80,10 @@
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": ">=0.86.0",
-    "react-native-gesture-handler": ">=3.3.0",
-    "react-native-reanimated": ">=4.7.0",
-    "react-native-teleport": ">=1.2.2",
-    "react-native-worklets": ">=0.13.0"
+    "react-native": ">=0.83.0",
+    "react-native-gesture-handler": ">=2.30.0",
+    "react-native-reanimated": ">=4.2.0",
+    "react-native-teleport": ">=1.2.2"
   },
   "workspaces": [
     "example"
