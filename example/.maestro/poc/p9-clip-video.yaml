@@ -1,0 +1,28 @@
+# Step 5.2 item 9: playback survives lifting a view that is cut (layout rule 4).
+# SURFACE=texture runs it on Android TextureView (default SurfaceView).
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-video
+- runFlow:
+    when:
+      true: ${SURFACE == "texture"}
+    commands:
+      - tapOn:
+          id: surface-toggle
+- tapOn:
+    id: clip-toggle
+- tapOn:
+    id: run-p9
+- extendedWaitUntil:
+    visible: Close
+    timeout: 5000
+- takeScreenshot: p9-lifted
+- extendedWaitUntil:
+    visible: "run P9 P9 done.*"
+    timeout: 30000
+- assertVisible: "run P9 P9 done ok"

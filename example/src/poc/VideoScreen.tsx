@@ -46,12 +46,68 @@ async function cycle(
 
 let surfaceName = 'surfaceView';
 
+// Step 5.2 item 9: a view too tall for the menu is cut (layout rule 4), which
+// re-parents its native children twice more while shown. The video sits in
+// the middle so it stays visible whichever side is cut. Pass: as P4.
+const LINES = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n');
+
+function ClipVideo({ surface }: { surface: 'surfaceView' | 'textureView' }) {
+  const [result, setResult] = useState('idle');
+  const handle = useLiftRef();
+  const player = useVideoPlayer(SOURCE, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+  const { isPlaying } = useEvent(player, 'playingChange', {
+    isPlaying: player.playing,
+  });
+  const stats = useRef<Stats>({ time: () => player.currentTime, pauses: 0 });
+  const wasPlaying = useRef(false);
+  useEffect(() => {
+    if (wasPlaying.current && !isPlaying) {
+      stats.current.pauses++;
+    }
+    wasPlaying.current = isPlaying;
+  }, [isPlaying]);
+  const run = async () => {
+    setResult('running');
+    const ok = await cycle('expo-video-clip', handle, stats.current);
+    setResult(`P9 done ${ok ? 'ok' : 'FAIL'}`);
+  };
+  return (
+    <>
+      <Pressable testID="run-p9" style={styles.button} onPress={run}>
+        <Text>{`run P9 ${result}`}</Text>
+      </Pressable>
+      <Liftable
+        ref={handle}
+        longPress={false}
+        menu={[{ key: 'close', title: 'Close', onPress: () => {} }]}
+      >
+        <View style={styles.tall}>
+          <Text>{LINES}</Text>
+          <VideoView
+            key={surface}
+            player={player}
+            surfaceType={surface}
+            nativeControls={false}
+            style={styles.video}
+          />
+          <Text>{LINES}</Text>
+        </View>
+      </Liftable>
+    </>
+  );
+}
+
 export function VideoScreen() {
   const [surface, setSurface] = useState<'surfaceView' | 'textureView'>(
     'surfaceView'
   );
   surfaceName = surface;
   const [result, setResult] = useState('idle');
+  const [clip, setClip] = useState(false);
   const expoHandle = useLiftRef();
   const rnvHandle = useLiftRef();
   const player = useVideoPlayer(SOURCE, (p) => {
@@ -99,37 +155,50 @@ export function VideoScreen() {
             <Text>{`surface:${surface}`}</Text>
           </Pressable>
         )}
+        <Pressable
+          testID="clip-toggle"
+          style={styles.button}
+          onPress={() => setClip((v) => !v)}
+        >
+          <Text>{`clip:${clip ? 'on' : 'off'}`}</Text>
+        </Pressable>
       </View>
-      <Text testID="p4-result">{result}</Text>
-      <Liftable ref={expoHandle} longPress={false}>
-        <VideoView
-          key={surface}
-          player={player}
-          surfaceType={surface}
-          nativeControls={false}
-          style={styles.video}
-        />
-      </Liftable>
-      <Liftable ref={rnvHandle} longPress={false}>
-        <Video
-          key={surface}
-          source={SOURCE}
-          repeat
-          muted
-          viewType={
-            surface === 'surfaceView' ? ViewType.SURFACE : ViewType.TEXTURE
-          }
-          onProgress={(ev) => {
-            rnvTime.current = ev.currentTime;
-          }}
-          onPlaybackStateChanged={(ev) => {
-            if (!ev.isPlaying) {
-              rnv.current.pauses++;
-            }
-          }}
-          style={styles.video}
-        />
-      </Liftable>
+      {clip ? (
+        <ClipVideo surface={surface} />
+      ) : (
+        <>
+          <Text testID="p4-result">{result}</Text>
+          <Liftable ref={expoHandle} longPress={false}>
+            <VideoView
+              key={surface}
+              player={player}
+              surfaceType={surface}
+              nativeControls={false}
+              style={styles.video}
+            />
+          </Liftable>
+          <Liftable ref={rnvHandle} longPress={false}>
+            <Video
+              key={surface}
+              source={SOURCE}
+              repeat
+              muted
+              viewType={
+                surface === 'surfaceView' ? ViewType.SURFACE : ViewType.TEXTURE
+              }
+              onProgress={(ev) => {
+                rnvTime.current = ev.currentTime;
+              }}
+              onPlaybackStateChanged={(ev) => {
+                if (!ev.isPlaying) {
+                  rnv.current.pauses++;
+                }
+              }}
+              style={styles.video}
+            />
+          </Liftable>
+        </>
+      )}
     </View>
   );
 }
@@ -139,4 +208,5 @@ const styles = StyleSheet.create({
   bar: { flexDirection: 'row', gap: 8 },
   button: { padding: 8, backgroundColor: '#ddd', borderRadius: 6 },
   video: { width: 320, height: 180, backgroundColor: '#000' },
+  tall: { gap: 8 },
 });
