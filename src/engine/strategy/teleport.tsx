@@ -417,7 +417,7 @@ export function LiftSlot({
   const liftedRef = useRef<Lifted | null>(null);
   // Bumped by every lift()/drop(); a pending lift/drop continues only if current.
   const dropToken = useRef(0);
-  // Waiting for the keyboard to close before measuring (P6 "닫힘 대기").
+  // Waiting for the keyboard to close before measuring (the P6 "wait for close" path).
   const pendingLift = useRef(false);
   // Token the pending lift commits under; a lift() during the wait refreshes
   // it (last call wins), a drop() leaves it stale (cancel).

@@ -202,7 +202,7 @@ def device_id(platform):
 
 
 def uptime_hours(platform):
-    # Since the last (cold) boot, recorded with every run (poc-measure 1절).
+    # Since the last (cold) boot, recorded with every run (measurement procedure, section 1).
     if platform == 'ios':
         ps = subprocess.run(['ps', '-axo', 'etime=,command='],
                             capture_output=True, text=True).stdout
