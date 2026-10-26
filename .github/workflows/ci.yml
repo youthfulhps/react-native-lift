@@ -62,11 +62,15 @@ jobs:
 
       - name: Build release
         env:
-          GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx6g'
+          GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g'
         working-directory: example/android
-        # One ABI: with all four the runner was lost mid-build (likely memory).
+        # Fit the runner's memory: one JVM (no daemon, Kotlin in-process), two
+        # workers, one ABI. A 6g daemon plus the Kotlin daemon was killed in R8.
         # CI only checks that the release build compiles.
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=x86_64
+        run: >
+          ./gradlew assembleRelease --no-daemon --max-workers=2
+          -PreactNativeArchitectures=x86_64
+          -Pkotlin.compiler.execution.strategy=in-process
 
   ios:
     runs-on: macos-latest
