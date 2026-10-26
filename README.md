@@ -40,6 +40,8 @@ npm install react-native-lift react-native-teleport react-native-reanimated reac
 
 With Expo, install the native peers with `npx expo install` so they match your SDK. react-native-teleport has native code, so use a development build, not Expo Go.
 
+With bare React Native, run `pod install` in `ios/` afterwards, and add `react-native-worklets/plugin` as the last plugin in `babel.config.js`, as the [Reanimated installation guide](https://docs.swmansion.com/react-native-reanimated/docs/fundamentals/getting-started/) describes. The example app is an Expo development build; bare React Native setups are not tested yet.
+
 The examples below also use [react-native-safe-area-context](https://github.com/appandflow/react-native-safe-area-context) for the safe area insets (optional).
 
 ## Usage
