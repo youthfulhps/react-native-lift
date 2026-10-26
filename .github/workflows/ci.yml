@@ -30,6 +30,7 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,7 +64,9 @@ jobs:
         env:
           GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx6g'
         working-directory: example/android
-        run: ./gradlew assembleRelease
+        # One ABI: with all four the runner was lost mid-build (likely memory).
+        # CI only checks that the release build compiles.
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=x86_64
 
   ios:
     runs-on: macos-latest
