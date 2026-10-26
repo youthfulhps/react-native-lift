@@ -417,7 +417,7 @@ export function LiftSlot({
   const liftedRef = useRef<Lifted | null>(null);
   // Bumped by every lift()/drop(); a pending lift/drop continues only if current.
   const dropToken = useRef(0);
-  // Waiting for the keyboard to close before measuring (P6 "닫힘 대기").
+  // Waiting for the keyboard to close before measuring (the P6 "wait for close" path).
   const pendingLift = useRef(false);
   // Token the pending lift commits under; a lift() during the wait refreshes
   // it (last call wins), a drop() leaves it stale (cancel).
@@ -859,6 +859,11 @@ export function LiftSlot({
     };
   };
 
+  // The content fills the slot only when the slot's style sizes it. Unsized,
+  // a growing chain would take all the height a non-stretch alignSelf offers
+  // (in a ScrollView: the whole viewport) instead of the content's.
+  const fill = sizesHeight(style) ? styles.fill : undefined;
+
   return (
     <View
       ref={wrapperRef}
@@ -879,23 +884,24 @@ export function LiftSlot({
           sizes the Portal to the host, so the rect goes on the container. */}
       <Portal
         hostName={shown ? HOST_NAME : undefined}
-        style={shown ? undefined : styles.fill}
+        style={shown ? undefined : fill}
       >
         <Animated.View
           collapsable={false}
           // Cut: a tap on the hidden part reaches the backdrop and drops.
           pointerEvents={clipped ? 'box-none' : undefined}
           style={[
-            shown ? [styles.absolute, rectOf(shown)] : styles.fill,
+            shown ? [styles.absolute, rectOf(shown)] : fill,
             containerStyle,
           ]}
         >
           {/* Rule 4: plain views, so the handoff path gains no animated
-              component. Uncut, both just fill the container (layout only,
-              flattened); cut, the outer one is the visible part and the inner
-              one keeps the view's own size, shifted under it. */}
-          <View style={clipped ? clipRect(shown, cut) : styles.fill}>
-            <View style={clipped ? innerRect(shown, cut) : styles.fill}>
+              component. Uncut, both are layout only (flattened) and fill the
+              container when the slot is sized; cut, the outer one is the
+              visible part and the inner one keeps the view's own size,
+              shifted under it. */}
+          <View style={clipped ? clipRect(shown, cut) : fill}>
+            <View style={clipped ? innerRect(shown, cut) : fill}>
               {children}
             </View>
           </View>
@@ -904,6 +910,20 @@ export function LiftSlot({
     </View>
   );
 }
+
+// ponytail: reads the slot's own style only; a slot sized by its parent
+// alone (stretch in a row) does not fill. Pass flex or a height to fill.
+const sizesHeight = (style: StyleProp<ViewStyle>) => {
+  const s = StyleSheet.flatten(style) ?? {};
+  return (
+    s.height != null ||
+    s.minHeight != null ||
+    s.aspectRatio != null ||
+    (s.flex ?? 0) > 0 ||
+    (s.flexGrow ?? 0) > 0 ||
+    (s.flexBasis != null && s.flexBasis !== 'auto')
+  );
+};
 
 const rectOf = ({ left, top, width, height }: Lifted) => ({
   left,

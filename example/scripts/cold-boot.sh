@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cold boot the booted simulator/emulator before a measurement set (poc-measure 1절).
+# Cold boot the booted simulator/emulator before a measurement set (measurement procedure, section 1).
 # Usage: cold-boot.sh ios|android
 set -eu
 if [ "$1" = ios ]; then

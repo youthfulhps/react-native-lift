@@ -1,0 +1,22 @@
+# README compare GIFs, step 1 (not recorded): open the screen in MODE.
+# Build with EXPO_PUBLIC_DEMO=compare.
+appId: lift.example
+---
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: "mode: teleport.*"
+    timeout: 15000
+- runFlow:
+    when:
+      true: ${MODE == "clone"}
+    commands:
+      - tapOn:
+          id: compare-mode
+      - extendedWaitUntil:
+          visible: "mode: clone.*"
+          timeout: 5000
+# Let the 30 s clip run on so the recorded lift lands early in its second
+# loop: no loop (which looks like a restart) while the view is lifted.
+- waitForAnimationToEnd:
+    timeout: 10000

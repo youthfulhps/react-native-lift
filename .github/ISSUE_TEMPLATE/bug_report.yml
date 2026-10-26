@@ -1,0 +1,83 @@
+name: Bug report
+description: Something does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A minimal reproduction gets a bug fixed much faster.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: |
+        A minimal code sample (the Liftable, its props and the list or screen around it) and the steps.
+        A link to a repository or Expo Snack is best.
+      placeholder: |
+        1. Render a FlatList with <Liftable menu={...}> rows
+        2. Long-press the last row
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: lift-version
+    attributes:
+      label: react-native-lift version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Dependency versions
+      description: From your lockfile.
+      value: |
+        react-native:
+        react-native-reanimated:
+        react-native-worklets:
+        react-native-gesture-handler:
+        react-native-teleport:
+        Expo SDK (or "bare"):
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - iOS
+        - Android
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and OS version
+      description: Real device or simulator/emulator.
+      placeholder: iPhone 15 Pro simulator, iOS 18.4 / Galaxy S21, Android 15
+    validations:
+      required: true
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build
+      options:
+        - Debug
+        - Release
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: Video or screenshots
+      description: A screen recording helps a lot for animation and layout issues.

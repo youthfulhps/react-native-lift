@@ -1,0 +1,25 @@
+# README compare GIFs, step 2 (recorded): the same steps in both modes.
+# The playing video never settles: short settle waits keep the lift well
+# before the 30 s clip loops (a loop would look like a restart), and
+# waitForAnimationToEnd always waits its full timeout.
+# Points, not ids: the Liftable (and the clone's Pressable) is one
+# accessibility element, so the field inside is not in the hierarchy.
+appId: lift.example
+---
+- tapOn:
+    point: "50%,41%"
+    waitToSettleTimeoutMs: 300
+- inputText: "Still here?"
+- pressKey: Enter
+- waitForAnimationToEnd:
+    timeout: 1000
+- longPressOn:
+    point: "50%,27%"
+    waitToSettleTimeoutMs: 300
+- waitForAnimationToEnd:
+    timeout: 500
+- tapOn:
+    point: "50%,85%"
+    waitToSettleTimeoutMs: 300
+- waitForAnimationToEnd:
+    timeout: 1500

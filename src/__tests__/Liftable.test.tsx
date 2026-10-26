@@ -500,8 +500,9 @@ test('the menu is measured hidden, then placed and shown', async () => {
   );
   await placeChrome();
   const placed = screen.getByTestId('lift-menu');
-  // Below the view (host-local 0..60) plus the gap.
-  expect(styleOf(placed)).toMatchObject({ left: 0, top: 68 });
+  // Below the view (host-local 0..60) plus the gap; 8 in from the side the
+  // full-width view touches (edgeMargin).
+  expect(styleOf(placed)).toMatchObject({ left: 8, top: 68 });
   expect(styleOf(placed).opacity).toBeUndefined();
   // Appear fades it in.
   expect(mockAnimations.some((a) => a.to === 1 && a.kind === 'timing')).toBe(
@@ -692,7 +693,7 @@ test('a view too tall for the menu shrinks and is clipped, and grows back before
   // content -> inner -> clip -> container.
   const clip = () => screen.getByTestId('content').parent!.parent!;
   const inner = () => screen.getByTestId('content').parent!;
-  expect(StyleSheet.flatten(clip().props.style).overflow).toBeUndefined();
+  expect(StyleSheet.flatten(clip().props.style)?.overflow).toBeUndefined();
   await longPress();
   await placeChrome();
   expect(mockAnimations.some((a) => a.to === 0.5)).toBe(true);
@@ -728,7 +729,7 @@ test('a view too tall for the menu shrinks and is clipped, and grows back before
   await act(() => ref.current!.drop());
   expect(mockAnimations.some((a) => a.to === 1)).toBe(true);
   // The cut part is outside the safe area: shown again as the view grows back.
-  expect(StyleSheet.flatten(clip().props.style).overflow).toBeUndefined();
+  expect(StyleSheet.flatten(clip().props.style)?.overflow).toBeUndefined();
   // The scale back (300ms) outlasts the fade (200ms).
   await act(() => jest.advanceTimersByTime(250));
   expect(onLiftEnd).not.toHaveBeenCalled();
@@ -782,7 +783,7 @@ test('the cut comes back with a lift during the drop, and never outlives the lif
   const overflow = () =>
     StyleSheet.flatten(
       screen.getByTestId('content').parent!.parent!.props.style
-    ).overflow;
+    )?.overflow;
   await longPress();
   await placeChrome();
   expect(overflow()).toBe('hidden');
@@ -856,4 +857,24 @@ test('accessible: a menu makes the view one element, unless overridden', async (
   await view.rerender(app({ menu: menuItems(), accessible: false }));
   expect(wrapper().props.accessible).toBe(false);
   expect(wrapper().props.accessibilityActions).toHaveLength(2);
+});
+
+test('the content fills the slot only when the slot style sizes it', async () => {
+  // content -> inner -> clip -> container (the Portal mock adds nothing).
+  const chain = () => {
+    const inner = screen.getByTestId('content').parent!;
+    return [inner, inner.parent!, inner.parent!.parent!].map(
+      (el) => StyleSheet.flatten(el.props.style)?.flexGrow
+    );
+  };
+  // Unsized (a chat bubble aligned to one side): the content's own height.
+  // A growing chain would take all the height alignSelf leaves it.
+  const view = await render(app({ style: { alignSelf: 'flex-end' } }));
+  expect(chain()).toEqual([undefined, undefined, undefined]);
+  await view.rerender(app({ style: { flex: 1 } }));
+  expect(chain()).toEqual([1, 1, 1]);
+  await view.rerender(app({ style: { height: 120 } }));
+  expect(chain()).toEqual([1, 1, 1]);
+  await view.rerender(app({ style: { width: '60%' } }));
+  expect(chain()).toEqual([undefined, undefined, undefined]);
 });

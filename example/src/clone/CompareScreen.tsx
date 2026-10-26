@@ -11,6 +11,7 @@ function Cell() {
     <View style={styles.cell}>
       <Clip />
       <TextInput
+        testID="compare-input"
         style={styles.input}
         placeholder="Type here, then long press"
       />
