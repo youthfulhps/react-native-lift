@@ -1,20 +1,24 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSharedValue, withSpring } from 'react-native-reanimated';
 import { Liftable } from 'react-native-lift';
 
 // P5: a Pressable and an RNGH pan inside the lifted (teleported) view.
-// Driven by example/.maestro/poc/p5-gestures.yaml.
+// Driven by example/.maestro/poc/p5-gestures.yaml. The builder API runs on
+// Gesture Handler 2 and 3, like the library.
 export function GesturesScreen() {
   const [pressed, setPressed] = useState(0);
   const [panned, setPanned] = useState(false);
   const [lifted, setLifted] = useState(false);
   const scale = useSharedValue(1);
-  const pan = usePanGesture({
-    runOnJS: true,
-    onUpdate: () => setPanned(true),
-  });
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .onUpdate(() => setPanned(true)),
+    []
+  );
   return (
     <View style={styles.screen}>
       <Text testID="gesture-status">
