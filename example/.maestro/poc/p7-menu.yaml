@@ -1,0 +1,23 @@
+# P7 (Step 5.2): 20 lifts with the real menu hop, measured by Flashlight.
+# lift -> menu -> pick an item -> drop, back to back.
+appId: lift.example
+---
+- runFlow:
+    when:
+      true: ${LAUNCH == "1"}
+    file: _launch.yaml
+- tapOn:
+    id: tab-ex
+- tapOn:
+    id: ex-menu
+- repeat:
+    times: 20
+    commands:
+      - longPressOn: "row a"
+      - extendedWaitUntil:
+          visible: Copy
+          timeout: 5000
+      - tapOn: Copy
+      - extendedWaitUntil:
+          notVisible: Copy
+          timeout: 5000

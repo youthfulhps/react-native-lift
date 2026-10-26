@@ -16,8 +16,11 @@ appId: lift.example
           id: surface-toggle
 - tapOn:
     id: clip-toggle
+# The playing video never settles the hierarchy: without a short settle wait
+# the tap blocks until all lift cycles are over.
 - tapOn:
     id: run-p9
+    waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible: Close
     timeout: 5000

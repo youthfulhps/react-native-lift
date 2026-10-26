@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Liftable, useLiftScrollLock, type MenuItem } from 'react-native-lift';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Step 3.2 smoke: menu, accessory and layout around the lifted view. Rows at
 // the top, middle and bottom, plus one too tall for the menu (it shrinks).
@@ -16,6 +17,8 @@ const REACTIONS = ['👍', '❤️', '😂', '😮'];
 export function MenuScreen() {
   const scrollEnabled = useLiftScrollLock();
   const [last, setLast] = useState('-');
+  // Android 15 draws behind a 3-button nav bar: keep the last row above it.
+  const { bottom } = useSafeAreaInsets();
   const items = (id: string): MenuItem[] => [
     { key: 'reply', title: 'Reply', onPress: () => setLast(`reply ${id}`) },
     { key: 'copy', title: 'Copy', onPress: () => setLast(`copy ${id}`) },
@@ -29,7 +32,10 @@ export function MenuScreen() {
   return (
     <View style={styles.screen}>
       <Text testID="menu-last">{`last:${last}`}</Text>
-      <ScrollView scrollEnabled={scrollEnabled}>
+      <ScrollView
+        scrollEnabled={scrollEnabled}
+        contentContainerStyle={{ paddingBottom: bottom }}
+      >
         {ROWS.map((row) => (
           <Liftable
             key={row.id}
