@@ -27,10 +27,12 @@ The same cell and the same steps, recorded side by side: type into the field, th
 
 ## Requirements
 
-- React Native 0.86–0.88, New Architecture
-- react-native-reanimated ≥ 4.7 and react-native-worklets ≥ 0.13
-- react-native-gesture-handler ≥ 3.3
+- React Native ≥ 0.83 (Expo SDK ≥ 55), New Architecture
+- react-native-reanimated ≥ 4.2, with the react-native-worklets version it requires
+- react-native-gesture-handler ≥ 2.30 (2.x or 3.x)
 - react-native-teleport ≥ 1.2.2
+
+Tested on Expo SDK 55 (React Native 0.83) and SDK 58 (React Native 0.88).
 
 ## Installation
 
