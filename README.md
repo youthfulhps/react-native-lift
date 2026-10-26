@@ -2,15 +2,28 @@
 
 Long-press a view to lift it above the screen with a context menu, like iOS context menus or Telegram message reactions.
 
+<p align="center">
+  <img src="docs/assets/imessage.gif" width="320" alt="Long-pressing chat bubbles in an iMessage-style thread to add tapbacks">
+</p>
+
+<p align="center">An iMessage-style chat from the example app: long-press a bubble for tapbacks and a menu.</p>
+
 > **0.x preview.** Tested on a real Android device (Samsung Galaxy S21, SM-G991N, Android 15) and on the iOS simulator. Testing on a real iPhone is planned before 1.0. If something looks wrong on a real device, please [open an issue](https://github.com/youthfulhps/react-native-lift/issues).
->
-> Performance: lifting with the menu averaged 56 fps at 60 Hz on that Galaxy S21, a 2021 flagship. Mid-range Android phones are not measured yet.
 
 The lifted view is the real view, not a copy. It is moved into an overlay with [react-native-teleport](https://github.com/kirillzyusko/react-native-teleport), so a playing video keeps playing, a text field keeps what you typed, and nothing is mounted twice. The menu is drawn by React Native and looks the same on iOS and Android.
 
-![Teleport vs. clone](docs/assets/compare.gif)
+<table>
+  <tr>
+    <th>react-native-lift (teleport)</th>
+    <th>Copied into a modal (clone)</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/compare-teleport.gif" width="320" alt="Lifted with react-native-lift: the video counter keeps counting and the typed text stays"></td>
+    <td><img src="docs/assets/compare-clone.gif" width="320" alt="Copied into a modal: the video starts over at 0 and the text field is empty"></td>
+  </tr>
+</table>
 
-The same cell, first lifted by react-native-lift, then copied into a modal (the usual clone approach). Lifted, the video keeps running and the typed text stays. The copy starts the video over with an empty text field.
+The same cell and the same steps, recorded side by side: type into the field, then long-press. Lifted, the video counter keeps counting and the typed text stays. The copy, the usual approach, starts the video over at 0 with an empty text field.
 
 ## Requirements
 
@@ -128,7 +141,7 @@ If the list rebinds the cell to another item while it is lifted, the view drops 
 | `disabled` | No long press, no `ref.lift()`, no accessibility actions. |
 | `scale` | Your own press-scale shared value, to animate it yourself. |
 | `accessible` | Defaults to `true` when there is a menu. See [Known limitations](#known-limitations). |
-| `style` | Style of the slot the view sits in. |
+| `style` | Style of the slot the view sits in, such as `alignSelf` for a chat bubble. The view fills the slot's height only when this style sets one (`flex`, `height`, `minHeight`, …). |
 
 ### Lift from code
 
@@ -224,7 +237,7 @@ On Android, after a long press that starts on an expo-video `VideoView` (`native
 
 ## Example app
 
-`example/` is an Expo app with a chat on FlashList with reactions, a photo grid, a video feed, and a teleport vs. clone comparison.
+`example/` is an Expo app with an iMessage-style chat with tapbacks, a chat on FlashList with reactions, a photo grid, a video feed, and a teleport vs. clone comparison.
 
 ```sh
 yarn

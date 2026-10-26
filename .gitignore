@@ -83,8 +83,11 @@ nitrogen/
 example/ios/
 example/android/
 
-# Step 1.2 measurement drops (videos/logs; see docs/poc-measure.md)
+# Step 1.2 measurement drops (videos/logs; procedure in .omc/docs/poc-measure.md)
 poc-runs/
 
 # Python
 __pycache__/
+
+# Internal docs (plan, spec, PoC reports) live in .omc/, not in the repo.
+docs/**/*.md
