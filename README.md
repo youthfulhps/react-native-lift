@@ -2,6 +2,10 @@
 
 Long-press a view to lift it above the screen with a context menu, like iOS context menus or Telegram message reactions.
 
+> **0.x preview.** Tested on a real Android device (Samsung Galaxy S21, SM-G991N, Android 15) and on the iOS simulator. Testing on a real iPhone is planned before 1.0. If something looks wrong on a real device, please [open an issue](https://github.com/youthfulhps/react-native-lift/issues).
+>
+> Performance: lifting with the menu averaged 56 fps at 60 Hz on that Galaxy S21, a 2021 flagship. Mid-range Android phones are not measured yet.
+
 The lifted view is the real view, not a copy. It is moved into an overlay with [react-native-teleport](https://github.com/kirillzyusko/react-native-teleport), so a playing video keeps playing, a text field keeps what you typed, and nothing is mounted twice. The menu is drawn by React Native and looks the same on iOS and Android.
 
 ![Teleport vs. clone](docs/assets/compare.gif)
