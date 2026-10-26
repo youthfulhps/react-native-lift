@@ -3288,14 +3288,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@shopify/flash-list@npm:2.3.2":
-  version: 2.3.2
-  resolution: "@shopify/flash-list@npm:2.3.2"
+"@shopify/flash-list@npm:2.3.3":
+  version: 2.3.3
+  resolution: "@shopify/flash-list@npm:2.3.3"
   peerDependencies:
     "@babel/runtime": "*"
     react: "*"
     react-native: "*"
-  checksum: 10c0/3e58913506b1dc7f02dd0696c478fd963ede413d9d7121705a08ff505d5c21e611813ce9370068238b8983ff582ed7b8ee94f68e94f99a1ac8f600c01fff118e
+  checksum: 10c0/c94af22f8b034d9f24e8ea3628ac20597cdb00f8c250d24a8e7adb86bc2a41cf10234c2fd87315bf7a34211db87d7eba40bddda610847cb6afedd2d6a1a3ffe5
   languageName: node
   linkType: hard
 
@@ -9365,7 +9365,7 @@ __metadata:
   resolution: "react-native-lift-example@workspace:example"
   dependencies:
     "@react-navigation/native": "npm:^7.5.1"
-    "@shopify/flash-list": "npm:2.3.2"
+    "@shopify/flash-list": "npm:2.3.3"
     expo: "npm:~58.0.17"
     expo-blur: "npm:~58.0.5"
     expo-dev-client: "npm:~58.0.14"
