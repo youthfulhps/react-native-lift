@@ -7,6 +7,9 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { ExamplesScreen } from './examples/ExamplesScreen';
+import { CompareScreen } from './clone/CompareScreen';
+import { IMessageScreen } from './examples/IMessageScreen';
+import { AlignSelfScreen } from './poc/AlignSelfScreen';
 import { FlatListScreen } from './poc/FlatListScreen';
 import { GesturesScreen } from './poc/GesturesScreen';
 import { KeyboardChatScreen } from './poc/KeyboardChatScreen';
@@ -25,6 +28,13 @@ const SCREENS = {
   ex: ExamplesScreen,
 };
 
+const DEMOS: Record<string, { Screen: () => React.JSX.Element; top: boolean }> =
+  {
+    imessage: { Screen: IMessageScreen, top: false },
+    compare: { Screen: CompareScreen, top: true },
+    align: { Screen: AlignSelfScreen, top: true },
+  };
+
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -38,6 +48,20 @@ function Root() {
   const insets = useSafeAreaInsets();
   const [screen, setScreen] = useState<keyof typeof SCREENS>('harness');
   const Screen = SCREENS[screen];
+  // README demo recordings: one screen alone, no PoC tabs.
+  const Demo = DEMOS[process.env.EXPO_PUBLIC_DEMO ?? ''];
+  if (Demo) {
+    const top = Demo.top ? insets.top : 0;
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <LiftProvider insets={insets}>
+          <View style={[styles.root, { paddingTop: top }]}>
+            <Demo.Screen />
+          </View>
+        </LiftProvider>
+      </GestureHandlerRootView>
+    );
+  }
   return (
     <GestureHandlerRootView style={styles.root}>
       <LiftProvider insets={insets}>

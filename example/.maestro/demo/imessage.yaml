@@ -1,0 +1,33 @@
+# README demo GIF: build with EXPO_PUBLIC_DEMO=imessage, record the simulator.
+appId: lift.example
+---
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: "Haha thank you!! See you at 7"
+    timeout: 15000
+- waitForAnimationToEnd
+- longPressOn: ".*SO good.*"
+- extendedWaitUntil:
+    visible:
+      id: "tapback-❤️"
+    timeout: 5000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tapback-❤️"
+- extendedWaitUntil:
+    notVisible:
+      id: "tapback-❤️"
+    timeout: 5000
+- waitForAnimationToEnd
+- longPressOn: "Yes! 7 at the ramen place?"
+- extendedWaitUntil:
+    visible: Reply
+    timeout: 5000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tapback-👍"
+- extendedWaitUntil:
+    notVisible: Reply
+    timeout: 5000
+- waitForAnimationToEnd

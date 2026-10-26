@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { CompareScreen } from '../clone/CompareScreen';
 import { MenuScreen } from '../poc/MenuScreen';
 import { ChatScreen } from './ChatScreen';
+import { IMessageScreen } from './IMessageScreen';
 import { PhotoGridScreen } from './PhotoGridScreen';
 import { VideoFeedScreen } from './VideoFeedScreen';
 
@@ -13,6 +14,7 @@ const SCREENS = {
   videos: VideoFeedScreen,
   compare: CompareScreen,
   menu: MenuScreen,
+  imessage: IMessageScreen,
 };
 
 export function ExamplesScreen() {
