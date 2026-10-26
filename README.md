@@ -246,7 +246,7 @@ yarn example ios     # or: yarn example android
 
 ## Contributing
 
-Issues and pull requests are welcome on [GitHub](https://github.com/youthfulhps/react-native-lift/issues).
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the example app and the design rules. Report security issues as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
