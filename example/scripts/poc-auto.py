@@ -201,6 +201,23 @@ def device_id(platform):
                           text=True, check=True).stdout.strip()
 
 
+def uptime_hours(platform):
+    # Since the last (cold) boot, recorded with every run (poc-measure 1절).
+    if platform == 'ios':
+        ps = subprocess.run(['ps', '-axo', 'etime=,command='],
+                            capture_output=True, text=True).stdout
+        etime = next((x.split()[0] for x in ps.splitlines()
+                      if 'launchd_sim' in x and device_id('ios') in x), None)
+        if not etime:
+            return None
+        d, _, hms = etime.rpartition('-')
+        h, m, sec = ([0, 0] + [int(x) for x in hms.split(':')])[-3:]
+        return round(int(d or 0) * 24 + h + m / 60 + sec / 3600, 2)
+    up = subprocess.run(['adb', 'shell', 'cat', '/proc/uptime'],
+                        capture_output=True, text=True).stdout.split()
+    return round(float(up[0]) / 3600, 2) if up else None
+
+
 def run_maestro(a):
     """One Maestro flow with the device log (and optionally the screen)
     captured; judged on the flow result, pixel windows and PROBE lines."""
@@ -237,7 +254,8 @@ def run_maestro(a):
     lines = log.lines
     v = {'flow': os.path.basename(a.maestro), 'env': a.env,
          'maestro_ok': r.returncode == 0,
-         'seconds': round(time.time() - started)}
+         'seconds': round(time.time() - started),
+         'uptime_h': uptime_hours(a.platform)}
     bad_cycles = set()
     if rec:
         win = next((re.search(r'win=([\d.]+)x', x).group(1) for x in lines
@@ -373,7 +391,8 @@ def main():
         log.close()
     with open(os.path.join(a.out, 'env.txt'), 'w') as f:
         f.write(f"device: {dev_name}\nos: {os_name}\nbuild: {a.build}\n"
-                f"recorder: {'simctl recordVideo h264' if a.platform == 'ios' else 'screenrecord 20M'}\n")
+                f"recorder: {'simctl recordVideo h264' if a.platform == 'ios' else 'screenrecord 20M'}\n"
+                f"uptime_h: {uptime_hours(a.platform)}\n")
     report(a, captured)
 
 
