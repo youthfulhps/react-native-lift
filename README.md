@@ -8,7 +8,7 @@ Long-press a view to lift it above the screen with a context menu, like iOS cont
 
 <p align="center">An iMessage-style chat from the example app: long-press a bubble for tapbacks and a menu.</p>
 
-> **0.x preview.** Tested on real devices, a Samsung Galaxy S21 (SM-G991N, Android 15) and an iPhone 12 Pro Max (iOS 26.6), and on the iOS simulator. If something looks wrong on your device, please [open an issue](https://github.com/youthfulhps/react-native-lift/issues).
+> **0.x preview.** If something looks wrong on your device, please [open an issue](https://github.com/youthfulhps/react-native-lift/issues).
 
 The lifted view is the real view, not a copy. It is moved into an overlay with [react-native-teleport](https://github.com/kirillzyusko/react-native-teleport), so a playing video keeps playing, a text field keeps what you typed, and nothing is mounted twice. The menu is drawn by React Native and looks the same on iOS and Android.
 
