@@ -52,7 +52,7 @@ maestro test example/.maestro/smoke.yaml
 
 ## Pull requests
 
-- One change per pull request. Pull requests are squash-merged, and the title becomes the commit message (`fix: …`, `feat: …`, `docs: …`).
+- One change per pull request. Pull requests are squash-merged, and the title becomes the commit message (`fix: …`, `feat: …`, `docs: …`). Releases come from these titles: [release-please](https://github.com/googleapis/release-please) keeps a release pull request open, and merging it tags the version and publishes to npm.
 - Update the README when behavior or the API changes.
 - Add a screen recording for visual changes.
 - Report security issues privately, see [SECURITY.md](SECURITY.md).

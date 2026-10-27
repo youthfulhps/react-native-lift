@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "43521ad43efc82bddd22facd04609e5a65429b40",
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "react-native-lift",
+      "include-component-in-tag": false,
+      "bump-minor-pre-major": true
+    }
+  }
+}
