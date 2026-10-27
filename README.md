@@ -8,8 +8,6 @@ Long-press a view to lift it above the screen with a context menu, like iOS cont
 
 <p align="center">An iMessage-style chat from the example app: long-press a bubble for tapbacks and a menu.</p>
 
-> **0.x preview.** Tested on a real Android device (Samsung Galaxy S21, SM-G991N, Android 15) and on the iOS simulator. Testing on a real iPhone is planned before 1.0. If something looks wrong on a real device, please [open an issue](https://github.com/youthfulhps/react-native-lift/issues).
-
 The lifted view is the real view, not a copy. It is moved into an overlay with [react-native-teleport](https://github.com/kirillzyusko/react-native-teleport), so a playing video keeps playing, a text field keeps what you typed, and nothing is mounted twice. The menu is drawn by React Native and looks the same on iOS and Android.
 
 <table>
@@ -40,9 +38,11 @@ Tested on Expo SDK 55 (React Native 0.83) and SDK 58 (React Native 0.88).
 npm install react-native-lift react-native-teleport react-native-reanimated react-native-worklets react-native-gesture-handler
 ```
 
+react-native-teleport lists `react-dom` as a peer. If npm stops with `ERESOLVE` on `react-dom`, add `react-dom` at the same version as your `react`, for example `react-dom@19.3.0` on React Native 0.88.
+
 With Expo, install the native peers with `npx expo install` so they match your SDK. react-native-teleport has native code, so use a development build, not Expo Go.
 
-With bare React Native, run `pod install` in `ios/` afterwards, and add `react-native-worklets/plugin` as the last plugin in `babel.config.js`, as the [Reanimated installation guide](https://docs.swmansion.com/react-native-reanimated/docs/fundamentals/getting-started/) describes. The example app is an Expo development build; bare React Native setups are not tested yet.
+With bare React Native, run `pod install` in `ios/` afterwards, and add `react-native-worklets/plugin` as the last plugin in `babel.config.js`, as the [Reanimated installation guide](https://docs.swmansion.com/react-native-reanimated/docs/fundamentals/getting-started/) describes.
 
 The examples below also use [react-native-safe-area-context](https://github.com/appandflow/react-native-safe-area-context) for the safe area insets (optional).
 
