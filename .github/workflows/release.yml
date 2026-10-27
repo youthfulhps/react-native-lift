@@ -40,6 +40,8 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
-      # `prepare` builds lib/ with bob. Provenance is added by Trusted Publishing.
-      - name: Publish
-        run: npm publish --access public
+      # Staged: the version goes public only after a maintainer approves it on
+      # npmjs.com with 2FA. `prepare` builds lib/ with bob; Trusted Publishing
+      # adds provenance.
+      - name: Stage on npm
+        run: npm stage publish --access public
