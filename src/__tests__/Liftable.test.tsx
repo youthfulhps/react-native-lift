@@ -42,12 +42,12 @@ jest.mock('react-native-reanimated', () => {
     useAnimatedStyle: (style: () => object) => style(),
     withTiming: animate('timing'),
     withSpring: animate('spring'),
+    runOnJS:
+      (fn: (...args: unknown[]) => void) =>
+      (...args: unknown[]) =>
+        fn(...args),
   };
 });
-jest.mock('react-native-worklets', () => ({
-  scheduleOnRN: (fn: (...args: unknown[]) => void, ...args: unknown[]) =>
-    fn(...args),
-}));
 
 // Each Liftable's gesture config, in mount order.
 const mockGestures: { onLift: () => void; press: unknown; release: unknown }[] =

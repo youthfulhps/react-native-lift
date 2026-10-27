@@ -23,6 +23,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import Animated, {
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -30,7 +31,6 @@ import Animated, {
   type WithTimingConfig,
 } from 'react-native-reanimated';
 import { Portal, PortalHost, PortalProvider } from 'react-native-teleport';
-import { scheduleOnRN } from 'react-native-worklets';
 import {
   computeLayout,
   type Insets,
@@ -426,7 +426,8 @@ export function LiftSlot({
   // itemKey when lift() was called; a rebind during the keyboard wait
   // cancels the lift.
   const liftKey = useRef<string | number | undefined>(undefined);
-  const focused = useRef<HostInstance | null>(null);
+  const focused =
+    useRef<ReturnType<typeof TextInput.State.currentlyFocusedInput>>(null);
   // The current drop's restoreFocus option.
   const dropFocus = useRef(true);
   // When the current drop's fade-out (and scale back) ends (Date.now() ms).
@@ -567,7 +568,7 @@ export function LiftSlot({
     offsetY.value = withTiming(t.y, latest.current.moveTiming, (finished) => {
       'worklet';
       if (finished) {
-        scheduleOnRN(settle, token, from, t);
+        runOnJS(settle)(token, from, t);
       }
     });
   };
