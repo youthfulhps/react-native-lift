@@ -32,7 +32,7 @@ The same cell and the same steps, recorded side by side: type into the field, th
 - react-native-gesture-handler ≥ 2.30 (2.x or 3.x)
 - react-native-teleport ≥ 1.2.2
 
-Tested on Expo SDK 55 (React Native 0.83) and SDK 58 (React Native 0.88), and on bare React Native 0.88 (iOS).
+Tested on Expo SDK 55 (React Native 0.83) and SDK 58 (React Native 0.88).
 
 ## Installation
 
@@ -44,7 +44,7 @@ react-native-teleport lists `react-dom` as a peer. If npm stops with `ERESOLVE` 
 
 With Expo, install the native peers with `npx expo install` so they match your SDK. react-native-teleport has native code, so use a development build, not Expo Go.
 
-With bare React Native, run `pod install` in `ios/` afterwards, and add `react-native-worklets/plugin` as the last plugin in `babel.config.js`, as the [Reanimated installation guide](https://docs.swmansion.com/react-native-reanimated/docs/fundamentals/getting-started/) describes. Bare React Native is tested on iOS (0.88); bare Android is not tested yet.
+With bare React Native, run `pod install` in `ios/` afterwards, and add `react-native-worklets/plugin` as the last plugin in `babel.config.js`, as the [Reanimated installation guide](https://docs.swmansion.com/react-native-reanimated/docs/fundamentals/getting-started/) describes.
 
 The examples below also use [react-native-safe-area-context](https://github.com/appandflow/react-native-safe-area-context) for the safe area insets (optional).
 
